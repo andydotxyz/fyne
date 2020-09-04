@@ -22,7 +22,7 @@ type radioRenderItem struct {
 type radioRenderer struct {
 	widget.BaseRenderer
 	items []*radioRenderItem
-	radio *Radio
+	radio *RadioGroup
 }
 
 func removeDuplicates(options []string) []string {
@@ -154,7 +154,12 @@ func (r *radioRenderer) updateItems() {
 
 // Radio widget has a list of text labels and radio check icons next to each.
 // Changing the selection (only one can be selected) will trigger the changed func.
-type Radio struct {
+// Deprecated: replaced by RadioGroup
+type Radio = RadioGroup
+
+// RadioGroup widget has a list of text labels and radio check icons next to each.
+// Changing the selection (only one can be selected) will trigger the changed func.
+type RadioGroup struct {
 	DisableableWidget
 	Horizontal bool
 	Required   bool
@@ -167,7 +172,7 @@ type Radio struct {
 }
 
 // indexByPosition returns the item index for a specified position or noRadioItemIndex if any
-func (r *Radio) indexByPosition(pos fyne.Position) int {
+func (r *RadioGroup) indexByPosition(pos fyne.Position) int {
 	index := 0
 	if r.Horizontal {
 		index = int(math.Floor(float64(pos.X) / float64(r.itemWidth())))
@@ -181,7 +186,7 @@ func (r *Radio) indexByPosition(pos fyne.Position) int {
 }
 
 // MouseIn is called when a desktop pointer enters the widget
-func (r *Radio) MouseIn(event *desktop.MouseEvent) {
+func (r *RadioGroup) MouseIn(event *desktop.MouseEvent) {
 	if r.Disabled() {
 		return
 	}
@@ -192,14 +197,14 @@ func (r *Radio) MouseIn(event *desktop.MouseEvent) {
 }
 
 // MouseOut is called when a desktop pointer exits the widget
-func (r *Radio) MouseOut() {
+func (r *RadioGroup) MouseOut() {
 	r.hoveredItemIndex = noRadioItemIndex
 	r.hovered = false
 	r.Refresh()
 }
 
 // MouseMoved is called when a desktop pointer hovers over the widget
-func (r *Radio) MouseMoved(event *desktop.MouseEvent) {
+func (r *RadioGroup) MouseMoved(event *desktop.MouseEvent) {
 	if r.Disabled() {
 		return
 	}
@@ -210,14 +215,14 @@ func (r *Radio) MouseMoved(event *desktop.MouseEvent) {
 }
 
 // Append adds a new option to the end of a Radio widget.
-func (r *Radio) Append(option string) {
+func (r *RadioGroup) Append(option string) {
 	r.Options = append(r.Options, option)
 
 	r.Refresh()
 }
 
 // Tapped is called when a pointer tapped event is captured and triggers any change handler
-func (r *Radio) Tapped(event *fyne.PointEvent) {
+func (r *RadioGroup) Tapped(event *fyne.PointEvent) {
 	if r.Disabled() {
 		return
 	}
@@ -245,13 +250,13 @@ func (r *Radio) Tapped(event *fyne.PointEvent) {
 }
 
 // MinSize returns the size that this widget should not shrink below
-func (r *Radio) MinSize() fyne.Size {
+func (r *RadioGroup) MinSize() fyne.Size {
 	r.ExtendBaseWidget(r)
 	return r.BaseWidget.MinSize()
 }
 
 // CreateRenderer is a private method to Fyne which links this widget to its renderer
-func (r *Radio) CreateRenderer() fyne.WidgetRenderer {
+func (r *RadioGroup) CreateRenderer() fyne.WidgetRenderer {
 	r.ExtendBaseWidget(r)
 	r.propertyLock.RLock()
 	defer r.propertyLock.RUnlock()
@@ -278,7 +283,7 @@ func (r *Radio) CreateRenderer() fyne.WidgetRenderer {
 }
 
 // SetSelected sets the radio option, it can be used to set a default option.
-func (r *Radio) SetSelected(option string) {
+func (r *RadioGroup) SetSelected(option string) {
 	if r.Selected == option {
 		return
 	}
@@ -292,7 +297,7 @@ func (r *Radio) SetSelected(option string) {
 	r.Refresh()
 }
 
-func (r *Radio) itemHeight() int {
+func (r *RadioGroup) itemHeight() int {
 	if r.Horizontal {
 		return r.MinSize().Height
 	}
@@ -304,7 +309,7 @@ func (r *Radio) itemHeight() int {
 	return r.MinSize().Height / count
 }
 
-func (r *Radio) itemWidth() int {
+func (r *RadioGroup) itemWidth() int {
 	if !r.Horizontal {
 		return r.MinSize().Width
 	}
@@ -316,13 +321,20 @@ func (r *Radio) itemWidth() int {
 	return r.MinSize().Width / count
 }
 
-func (r *Radio) removeDuplicateOptions() {
+func (r *RadioGroup) removeDuplicateOptions() {
 	r.Options = removeDuplicates(r.Options)
 }
 
 // NewRadio creates a new radio widget with the set options and change handler
+// Deprecated: Use NewRadioGroup
 func NewRadio(options []string, changed func(string)) *Radio {
-	r := &Radio{
+	r := NewRadioGroup(options, changed)
+	return interface{}(r).(*Radio)
+}
+
+// NewRadioGroup creates a new group of radio widgets with the set options and change handler
+func NewRadioGroup(options []string, changed func(string)) *RadioGroup {
+	r := &RadioGroup{
 		DisableableWidget: DisableableWidget{},
 		Options:           options,
 		OnChanged:         changed,
