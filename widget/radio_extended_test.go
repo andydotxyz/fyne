@@ -12,7 +12,7 @@ import (
 )
 
 type extendedRadio struct {
-	Radio
+	RadioGroup
 }
 
 func newExtendedRadio(opts []string, f func(string)) *extendedRadio {

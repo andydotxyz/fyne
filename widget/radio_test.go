@@ -95,7 +95,7 @@ func TestRadio_Layout(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			radio := &widget.Radio{
+			radio := &widget.RadioGroup{
 				Horizontal: tt.horizontal,
 				Options:    tt.options,
 				Selected:   tt.selected,
