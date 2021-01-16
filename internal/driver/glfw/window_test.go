@@ -484,6 +484,8 @@ func TestWindow_HoverableOnDragging(t *testing.T) {
 		},
 		dh.popDragEvent(),
 	)
+	assert.NotNil(t, dh.popMouseMovedEvent())
+	assert.Nil(t, dh.popMouseOutEvent())
 
 	// drag event going outside the widget's area
 	w.mouseMoved(w.viewport, 16, 8)
