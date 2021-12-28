@@ -26,9 +26,8 @@ type AppTabs struct {
 	OnSelected   func(*TabItem)
 	OnUnselected func(*TabItem)
 
-	current         int
-	location        TabLocation
-	isTransitioning bool
+	current  int
+	location TabLocation
 
 	popUpMenu *widget.PopUpMenu
 }
@@ -62,7 +61,7 @@ func (t *AppTabs) CreateRenderer() fyne.WidgetRenderer {
 	// Initially setup the tab bar to only show one tab, all others will be in overflow.
 	// When the widget is laid out, and we know the size, the tab bar will be updated to show as many as can fit.
 	r.updateTabs(1)
-	r.updateIndicator(false)
+	r.updateIndicator()
 	r.applyTheme(t)
 	return r
 }
@@ -228,16 +227,8 @@ func (t *AppTabs) setSelected(selected int) {
 	t.current = selected
 }
 
-func (t *AppTabs) setTransitioning(transitioning bool) {
-	t.isTransitioning = transitioning
-}
-
 func (t *AppTabs) tabLocation() TabLocation {
 	return t.location
-}
-
-func (t *AppTabs) transitioning() bool {
-	return t.isTransitioning
 }
 
 // Declare conformity with WidgetRenderer interface.
@@ -267,10 +258,7 @@ func (r *appTabsRenderer) Layout(size fyne.Size) {
 	}
 
 	r.layout(r.appTabs, size)
-	r.updateIndicator(r.appTabs.transitioning())
-	if r.appTabs.transitioning() {
-		r.appTabs.setTransitioning(false)
-	}
+	r.updateIndicator()
 }
 
 func (r *appTabsRenderer) MinSize() fyne.Size {
@@ -362,7 +350,7 @@ func (r *appTabsRenderer) buildTabButtons(count int) *fyne.Container {
 	return buttons
 }
 
-func (r *appTabsRenderer) updateIndicator(animate bool) {
+func (r *appTabsRenderer) updateIndicator() {
 	if r.appTabs.current < 0 {
 		r.indicator.Hide()
 		return
@@ -401,7 +389,7 @@ func (r *appTabsRenderer) updateIndicator(animate bool) {
 		indicatorSize = fyne.NewSize(theme.Padding(), selectedSize.Height)
 	}
 
-	r.moveIndicator(indicatorPos, indicatorSize, animate)
+	r.moveIndicator(indicatorPos, indicatorSize, true)
 }
 
 func (r *appTabsRenderer) updateTabs(max int) {

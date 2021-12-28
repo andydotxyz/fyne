@@ -59,9 +59,6 @@ type baseTabs interface {
 	setSelected(int)
 
 	tabLocation() TabLocation
-
-	transitioning() bool
-	setTransitioning(bool)
 }
 
 func tabsAdjustedLocation(l TabLocation) TabLocation {
@@ -166,7 +163,6 @@ func selectIndex(t baseTabs, index int) {
 		return
 	}
 
-	t.setTransitioning(true)
 	t.setSelected(index)
 
 	if f := t.onSelected(); f != nil {
