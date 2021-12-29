@@ -204,9 +204,10 @@ func setItems(t baseTabs, items []*TabItem) {
 type baseTabsRenderer struct {
 	positionAnimation, sizeAnimation *fyne.Animation
 
-	lastIndicatorMutex sync.RWMutex
-	lastIndicatorPos   fyne.Position
-	lastIndicatorSize  fyne.Size
+	lastIndicatorMutex  sync.RWMutex
+	lastIndicatorPos    fyne.Position
+	lastIndicatorSize   fyne.Size
+	lastIndicatorHidden bool
 
 	action             *widget.Button
 	bar                *fyne.Container
@@ -303,7 +304,8 @@ func (r *baseTabsRenderer) minSize(t baseTabs) fyne.Size {
 
 func (r *baseTabsRenderer) moveIndicator(pos fyne.Position, siz fyne.Size, animate bool) {
 	r.lastIndicatorMutex.RLock()
-	isSameState := r.lastIndicatorPos.Subtract(pos).IsZero() && r.lastIndicatorSize.Subtract(siz).IsZero()
+	isSameState := r.lastIndicatorPos.Subtract(pos).IsZero() && r.lastIndicatorSize.Subtract(siz).IsZero() &&
+		r.lastIndicatorHidden == r.indicator.Hidden
 	r.lastIndicatorMutex.RUnlock()
 	if isSameState {
 		return
@@ -318,7 +320,7 @@ func (r *baseTabsRenderer) moveIndicator(pos fyne.Position, siz fyne.Size, anima
 		r.sizeAnimation = nil
 	}
 
-	r.indicator.Show()
+	r.indicator.FillColor = theme.PrimaryColor()
 	if r.indicator.Position().IsZero() {
 		r.indicator.Move(pos)
 		r.indicator.Resize(siz)
@@ -329,6 +331,7 @@ func (r *baseTabsRenderer) moveIndicator(pos fyne.Position, siz fyne.Size, anima
 	r.lastIndicatorMutex.Lock()
 	r.lastIndicatorPos = pos
 	r.lastIndicatorSize = siz
+	r.lastIndicatorHidden = r.indicator.Hidden
 	r.lastIndicatorMutex.Unlock()
 
 	if animate {
