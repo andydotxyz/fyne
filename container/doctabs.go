@@ -63,7 +63,7 @@ func (t *DocTabs) CreateRenderer() fyne.WidgetRenderer {
 			buttonCache: make(map[*TabItem]*tabButton),
 		},
 		docTabs:  t,
-		scroller: NewScroll(nil),
+		scroller: NewScroll(&fyne.Container{}),
 	}
 	r.action = r.buildAllTabsButton()
 	r.create = r.buildCreateTabsButton()
@@ -279,8 +279,8 @@ func (r *docTabsRenderer) buildCreateTabsButton() *widget.Button {
 	return create
 }
 
-func (r *docTabsRenderer) buildTabButtons(count int) *fyne.Container {
-	buttons := &fyne.Container{}
+func (r *docTabsRenderer) buildTabButtons(count int, buttons *fyne.Container) {
+	buttons.Objects = nil
 
 	var iconPos buttonIconPosition
 	if fyne.CurrentDevice().IsMobile() {
@@ -325,7 +325,6 @@ func (r *docTabsRenderer) buildTabButtons(count int) *fyne.Container {
 		button.Refresh()
 		buttons.Objects = append(buttons.Objects, button)
 	}
-	return buttons
 }
 
 func (r *docTabsRenderer) scrollToSelected() {
@@ -431,8 +430,7 @@ func (r *docTabsRenderer) updateCreateTab() {
 
 func (r *docTabsRenderer) updateTabs() {
 	tabCount := len(r.docTabs.Items)
-
-	r.scroller.Content = r.buildTabButtons(tabCount)
+	r.buildTabButtons(tabCount, r.scroller.Content.(*fyne.Container))
 
 	// Set layout of tab bar containing tab buttons and overflow action
 	if r.docTabs.location == TabLocationLeading || r.docTabs.location == TabLocationTrailing {
