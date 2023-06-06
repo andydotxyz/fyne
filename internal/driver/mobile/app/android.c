@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <android_native_app_glue.h>
 #include "_cgo_export.h"
 
 #define LOG_INFO(...) __android_log_print(ANDROID_LOG_INFO, "Fyne", __VA_ARGS__)
@@ -66,6 +67,16 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 
 static int main_running = 0;
 
+static int32_t app_handle_event(struct android_app* app, AInputEvent* event) {
+    LOG_INFO("handle");
+    if (AKeyEvent_getKeyCode(event) == AKEYCODE_BACK) {
+        onBackPressed();
+        return 1; // <-- Prevent default handler
+    }
+    // ...
+    return 0;
+}
+
 // Entry point from our subclassed NativeActivity.
 //
 // By here, the Go runtime has been initialized (as we are running in
@@ -86,10 +97,13 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 		hide_keyboard_method = find_static_method(env, current_class, "hideKeyboard", "()V");
 		show_file_open_method = find_static_method(env, current_class, "showFileOpen", "(Ljava/lang/String;)V");
 		show_file_save_method = find_static_method(env, current_class, "showFileSave", "(Ljava/lang/String;Ljava/lang/String;)V");
-		finish_method = find_method(env, current_class, "finishActivity", "()V");
+		finish_method = find_method(env, current_class, "finish", "()V");
 
 		setCurrentContext(activity->vm, (*env)->NewGlobalRef(env, activity->clazz));
-
+		struct android_app* app = activity->instance;
+		LOG_INFO("ok 1");
+        app->onInputEvent = app_handle_event;
+        LOG_INFO("ok 2");
 		// Set FILESDIR
 		if (setenv("FILESDIR", activity->internalDataPath, 1) != 0) {
 			LOG_INFO("setenv(\"FILESDIR\", \"%s\", 1) failed: %d", activity->internalDataPath, errno);
@@ -279,10 +293,6 @@ void Java_org_golang_app_GoNativeActivity_keyboardTyped(JNIEnv *env, jclass claz
 
 void Java_org_golang_app_GoNativeActivity_keyboardDelete(JNIEnv *env, jclass clazz) {
     keyboardDelete();
-}
-
-void Java_org_golang_app_GoNativeActivity_backPressed(JNIEnv *env, jclass clazz) {
-    onBackPressed();
 }
 
 void Java_org_golang_app_GoNativeActivity_setDarkMode(JNIEnv *env, jclass clazz, jboolean dark) {
