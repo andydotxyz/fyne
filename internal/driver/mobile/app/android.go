@@ -23,9 +23,11 @@ the app package initialization.
 package app
 
 /*
+#cgo CFLAGS: -I/home/matejmag/android/sdk/ndk/25.1.8937393/sources/android/native_app_glue
 #cgo LDFLAGS: -landroid -llog -lEGL -lGLESv2
 
 #include <android/configuration.h>
+#include <android_native_app_glue.h>
 #include <android/input.h>
 #include <android/keycodes.h>
 #include <android/looper.h>
