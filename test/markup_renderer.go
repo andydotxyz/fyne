@@ -473,6 +473,7 @@ func knownResource(rsc fyne.Resource) string {
 		theme.NavigateNextIcon():       "navigateNextIcon",
 		theme.QuestionIcon():           "questionIcon",
 		theme.RadioButtonCheckedIcon(): "radioButtonCheckedIcon",
+		theme.RadioButtonFillIcon():    "radioButtonFillIcon",
 		theme.RadioButtonIcon():        "radioButtonIcon",
 		theme.SearchIcon():             "searchIcon",
 		theme.SearchReplaceIcon():      "searchReplaceIcon",
