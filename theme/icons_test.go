@@ -207,6 +207,11 @@ func Test_CheckButtonCheckedIcon_FileSource(t *testing.T) {
 	assert.Equal(t, "foreground_check-box-checked.svg", result)
 }
 
+func Test_CheckButtonFillIcon_FileSource(t *testing.T) {
+	result := CheckButtonFillIcon().Name()
+	assert.Equal(t, "foreground_check-box-fill.svg", result)
+}
+
 func Test_RadioButtonIcon_FileSource(t *testing.T) {
 	result := RadioButtonIcon().Name()
 	assert.Equal(t, "foreground_radio-button.svg", result)
@@ -215,6 +220,11 @@ func Test_RadioButtonIcon_FileSource(t *testing.T) {
 func Test_RadioButtonCheckedIcon_FileSource(t *testing.T) {
 	result := RadioButtonCheckedIcon().Name()
 	assert.Equal(t, "foreground_radio-button-checked.svg", result)
+}
+
+func Test_RadioButtonFillIcon_FileSource(t *testing.T) {
+	result := RadioButtonFillIcon().Name()
+	assert.Equal(t, "foreground_radio-button-fill.svg", result)
 }
 
 func Test_ContentAddIcon_FileSource(t *testing.T) {
