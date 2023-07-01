@@ -555,21 +555,30 @@ func runInputQueue(vm, jniEnv, ctx uintptr) error {
 	}
 }
 
+
 func processEvents(env *C.JNIEnv, q *C.AInputQueue) {
 	var e *C.AInputEvent
 	for C.AInputQueue_getEvent(q, &e) >= 0 {
 		if C.AInputQueue_preDispatchEvent(q, e) != 0 {
 			continue
 		}
-		processEvent(env, e)
-		C.AInputQueue_finishEvent(q, e, 0)
+		handle := processEvent(env, e)
+		C.AInputQueue_finishEvent(q, e, C.int(handle))
 	}
 }
 
-func processEvent(env *C.JNIEnv, e *C.AInputEvent) {
+func processEvent(env *C.JNIEnv, e *C.AInputEvent) int {
 	switch C.AInputEvent_getType(e) {
 	case C.AINPUT_EVENT_TYPE_KEY:
-		processKey(env, e)
+	    keyCode := C.AKeyEvent_getKeyCode(e)	
+	    if (keyCode == AKEYCODE_BACK) {
+                // Handle back button press
+		return 1    
+            } else if (keyCode == AKEYCODE_MENU) {
+                // Handle menu button press
+		return 1
+            } 
+	    processKey(env, e)
 	case C.AINPUT_EVENT_TYPE_MOTION:
 		// At most one of the events in this batch is an up or down event; get its index and change.
 		upDownIndex := C.size_t(C.AMotionEvent_getAction(e)&C.AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> C.AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT
@@ -596,6 +605,7 @@ func processEvent(env *C.JNIEnv, e *C.AInputEvent) {
 	default:
 		log.Printf("unknown input event, type=%d", C.AInputEvent_getType(e))
 	}
+	return 0
 }
 
 func processKey(env *C.JNIEnv, e *C.AInputEvent) {
