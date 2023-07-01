@@ -569,15 +569,7 @@ func processEvents(env *C.JNIEnv, q *C.AInputQueue) {
 func processEvent(env *C.JNIEnv, e *C.AInputEvent) int {
 	switch C.AInputEvent_getType(e) {
 	case C.AINPUT_EVENT_TYPE_KEY:
-	    keyCode := C.AKeyEvent_getKeyCode(e)	
-	    if (keyCode == AKEYCODE_BACK) {
-                // Handle back button press and return handle  
-		return 1    
-            } else if (keyCode == AKEYCODE_MENU) {
-                // Handle menu button press
-		return 1
-            } 
-	    processKey(env, e)
+	       return processKey(env, e)
 	case C.AINPUT_EVENT_TYPE_MOTION:
 		// At most one of the events in this batch is an up or down event; get its index and change.
 		upDownIndex := C.size_t(C.AMotionEvent_getAction(e)&C.AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> C.AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT
@@ -611,15 +603,20 @@ func processKey(env *C.JNIEnv, e *C.AInputEvent) {
 	deviceID := C.AInputEvent_getDeviceId(e)
 	if deviceID == 0 {
 		// Software keyboard input, leaving for scribe/IME.
-		return
+		return 0
 	}
-
+	keyCode := C.AKeyEvent_getKeyCode(e)	
+	if (keyCode == C.AKEYCODE_BACK) {  
+	    return 1 // Handle back button press and return handle   
+        } else if (keyCode == C.AKEYCODE_MENU) {                
+	    return 1 // Handle menu button press
+        } 
 	k := key.Event{
 		Rune: rune(C.getKeyRune(env, e)),
-		Code: convAndroidKeyCode(int32(C.AKeyEvent_getKeyCode(e))),
+		Code: convAndroidKeyCode(int32(keyCode)),
 	}
 	if k.Rune >= '0' && k.Rune <= '9' { // GBoard generates key events for numbers, but we see them in textChanged
-		return
+		return 0
 	}
 	switch C.AKeyEvent_getAction(e) {
 	case C.AKEY_STATE_DOWN:
@@ -630,7 +627,8 @@ func processKey(env *C.JNIEnv, e *C.AInputEvent) {
 		k.Direction = key.DirNone
 	}
 	// TODO(crawshaw): set Modifiers.
-	theApp.events.In() <- k
+	go func() {theApp.events.In() <- k}()
+	return 0
 }
 
 func eglGetError() string {
