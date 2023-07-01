@@ -569,7 +569,7 @@ func processEvents(env *C.JNIEnv, q *C.AInputQueue) {
 func processEvent(env *C.JNIEnv, e *C.AInputEvent) int {
 	switch C.AInputEvent_getType(e) {
 	case C.AINPUT_EVENT_TYPE_KEY:
-	       return processKey(env, e)
+		return processKey(env, e)
 	case C.AINPUT_EVENT_TYPE_MOTION:
 		// At most one of the events in this batch is an up or down event; get its index and change.
 		upDownIndex := C.size_t(C.AMotionEvent_getAction(e)&C.AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> C.AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT
@@ -599,7 +599,7 @@ func processEvent(env *C.JNIEnv, e *C.AInputEvent) int {
 	return 0
 }
 
-func processKey(env *C.JNIEnv, e *C.AInputEvent) {
+func processKey(env *C.JNIEnv, e *C.AInputEvent) int {
 	deviceID := C.AInputEvent_getDeviceId(e)
 	if deviceID == 0 {
 		// Software keyboard input, leaving for scribe/IME.
