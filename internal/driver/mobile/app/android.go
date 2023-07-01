@@ -555,7 +555,6 @@ func runInputQueue(vm, jniEnv, ctx uintptr) error {
 	}
 }
 
-
 func processEvents(env *C.JNIEnv, q *C.AInputQueue) {
 	var e *C.AInputEvent
 	for C.AInputQueue_getEvent(q, &e) >= 0 {
@@ -572,7 +571,7 @@ func processEvent(env *C.JNIEnv, e *C.AInputEvent) int {
 	case C.AINPUT_EVENT_TYPE_KEY:
 	    keyCode := C.AKeyEvent_getKeyCode(e)	
 	    if (keyCode == AKEYCODE_BACK) {
-                // Handle back button press
+                // Handle back button press and return handle  
 		return 1    
             } else if (keyCode == AKEYCODE_MENU) {
                 // Handle menu button press
