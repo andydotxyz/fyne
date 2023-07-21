@@ -63,10 +63,6 @@ func main(f func(App)) {
 	C.runApp()
 }
 
-func GoBack() {
-	// When simulating mobile there are no other activities open (and we can't just force background)
-}
-
 // loop is the primary drawing loop.
 //
 // After Cocoa has captured the initial OS thread for processing Cocoa
@@ -107,7 +103,9 @@ func (a *app) loop(ctx C.GLintptr) {
 		}
 	}
 }
+func Finish() {
 
+}
 var drawDone = make(chan struct{})
 
 // drawgl is used by Cocoa to occasionally request screen updates.

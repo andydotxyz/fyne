@@ -82,10 +82,6 @@ var DisplayMetrics struct {
 	HeightPx int
 }
 
-func GoBack() {
-	// Apple do not permit apps to exit in any way other than user pressing home button / gesture
-}
-
 //export setDisplayMetrics
 func setDisplayMetrics(width, height int, scale int) {
 	DisplayMetrics.WidthPx = width
@@ -150,7 +146,9 @@ func updateConfig(width, height, orientation int32) {
 	}
 	theApp.events.In() <- paint.Event{External: true}
 }
+func Finish() {
 
+}
 // touchIDs is the current active touches. The position in the array
 // is the ID, the value is the UITouch* pointer value.
 //

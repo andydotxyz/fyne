@@ -66,6 +66,21 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 
 static int main_running = 0;
 
+void set_global(ANativeActivity *activity){
+	JNIEnv* env = activity->env;
+    // Note that activity->clazz is mis-named.
+    current_class = (*env)->GetObjectClass(env, activity->clazz);
+	current_class = (*env)->NewGlobalRef(env, current_class);
+	key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
+	show_keyboard_method = find_static_method(env, current_class, "showKeyboard", "(I)V");
+	hide_keyboard_method = find_static_method(env, current_class, "hideKeyboard", "()V");
+	show_file_open_method = find_static_method(env, current_class, "showFileOpen", "(Ljava/lang/String;)V");
+	show_file_save_method = find_static_method(env, current_class, "showFileSave", "(Ljava/lang/String;Ljava/lang/String;)V");
+	finish_method = find_method(env, current_class, "finish", "()V");
+
+	setCurrentContext(activity->vm, (*env)->NewGlobalRef(env, activity->clazz));
+}
+
 // Entry point from our subclassed NativeActivity.
 //
 // By here, the Go runtime has been initialized (as we are running in
@@ -78,17 +93,7 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 	if (!main_running) {
 		JNIEnv* env = activity->env;
 
-		// Note that activity->clazz is mis-named.
-		current_class = (*env)->GetObjectClass(env, activity->clazz);
-		current_class = (*env)->NewGlobalRef(env, current_class);
-		key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
-		show_keyboard_method = find_static_method(env, current_class, "showKeyboard", "(I)V");
-		hide_keyboard_method = find_static_method(env, current_class, "hideKeyboard", "()V");
-		show_file_open_method = find_static_method(env, current_class, "showFileOpen", "(Ljava/lang/String;)V");
-		show_file_save_method = find_static_method(env, current_class, "showFileSave", "(Ljava/lang/String;Ljava/lang/String;)V");
-		finish_method = find_method(env, current_class, "finishActivity", "()V");
-
-		setCurrentContext(activity->vm, (*env)->NewGlobalRef(env, activity->clazz));
+		set_global(activity);
 
 		// Set FILESDIR
 		if (setenv("FILESDIR", activity->internalDataPath, 1) != 0) {
@@ -160,6 +165,13 @@ static char* initEGLDisplay() {
 	return NULL;
 }
 
+void finish(JNIEnv* env, jobject ctx) {
+    (*env)->CallVoidMethod(
+        env,
+        ctx,
+        finish_method);
+}
+
 char* createEGLSurface(ANativeWindow* window) {
 	char* err;
 	EGLint numConfigs, format;
@@ -204,13 +216,6 @@ char* destroyEGLSurface() {
 		return "EGL destroy surface failed";
 	}
 	return NULL;
-}
-
-void finish(JNIEnv* env, jobject ctx) {
-    (*env)->CallVoidMethod(
-        env,
-        ctx,
-        finish_method);
 }
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e) {
@@ -279,10 +284,6 @@ void Java_org_golang_app_GoNativeActivity_keyboardTyped(JNIEnv *env, jclass claz
 
 void Java_org_golang_app_GoNativeActivity_keyboardDelete(JNIEnv *env, jclass clazz) {
     keyboardDelete();
-}
-
-void Java_org_golang_app_GoNativeActivity_backPressed(JNIEnv *env, jclass clazz) {
-    onBackPressed();
 }
 
 void Java_org_golang_app_GoNativeActivity_setDarkMode(JNIEnv *env, jclass clazz, jboolean dark) {
