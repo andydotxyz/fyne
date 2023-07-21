@@ -7,7 +7,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/driver/mobile"
 	"fyne.io/fyne/v2/internal"
 	"fyne.io/fyne/v2/internal/animation"
 	intapp "fyne.io/fyne/v2/internal/app"
@@ -23,7 +22,6 @@ import (
 	"fyne.io/fyne/v2/internal/driver/mobile/gl"
 	"fyne.io/fyne/v2/internal/painter"
 	pgl "fyne.io/fyne/v2/internal/painter/gl"
-	"fyne.io/fyne/v2/internal/scale"
 	"fyne.io/fyne/v2/theme"
 )
 
@@ -128,11 +126,8 @@ func (d *mobileDriver) AbsolutePositionForObject(co fyne.CanvasObject) fyne.Posi
 	return pos.Subtract(inset)
 }
 
-func (d *mobileDriver) GoBack() {
-	app.GoBack()
-}
-
 func (d *mobileDriver) Quit() {
+	app.Finish()
 	// Android and iOS guidelines say this should not be allowed!
 }
 
@@ -294,19 +289,19 @@ func (d *mobileDriver) paintWindow(window fyne.Window, size fyne.Size) {
 			inner := clips.Push(pos, obj.Size())
 			c.Painter().StartClipping(inner.Rect())
 		}
+
+		if size.Width <= 0 || size.Height <= 0 { // iconifying on Windows can do bad things
+			return
+		}
 		c.Painter().Paint(obj, pos, size)
 	}
-	afterDraw := func(node *common.RenderCacheNode, pos fyne.Position) {
+	afterDraw := func(node *common.RenderCacheNode) {
 		if _, ok := node.Obj().(fyne.Scrollable); ok {
 			c.Painter().StopClipping()
 			clips.Pop()
 			if top := clips.Top(); top != nil {
 				c.Painter().StartClipping(top.Rect())
 			}
-		}
-
-		if c.debug {
-			c.DrawDebugOverlay(node.Obj(), pos, size)
 		}
 	}
 
@@ -336,16 +331,16 @@ func (d *mobileDriver) setTheme(dark bool) {
 }
 
 func (d *mobileDriver) tapDownCanvas(w *window, x, y float32, tapID touch.Sequence) {
-	tapX := scale.ToFyneCoordinate(w.canvas, int(x))
-	tapY := scale.ToFyneCoordinate(w.canvas, int(y))
+	tapX := internal.UnscaleInt(w.canvas, int(x))
+	tapY := internal.UnscaleInt(w.canvas, int(y))
 	pos := fyne.NewPos(tapX, tapY+tapYOffset)
 
 	w.canvas.tapDown(pos, int(tapID))
 }
 
 func (d *mobileDriver) tapMoveCanvas(w *window, x, y float32, tapID touch.Sequence) {
-	tapX := scale.ToFyneCoordinate(w.canvas, int(x))
-	tapY := scale.ToFyneCoordinate(w.canvas, int(y))
+	tapX := internal.UnscaleInt(w.canvas, int(x))
+	tapY := internal.UnscaleInt(w.canvas, int(y))
 	pos := fyne.NewPos(tapX, tapY+tapYOffset)
 
 	w.canvas.tapMove(pos, int(tapID), func(wid fyne.Draggable, ev *fyne.DragEvent) {
@@ -354,8 +349,8 @@ func (d *mobileDriver) tapMoveCanvas(w *window, x, y float32, tapID touch.Sequen
 }
 
 func (d *mobileDriver) tapUpCanvas(w *window, x, y float32, tapID touch.Sequence) {
-	tapX := scale.ToFyneCoordinate(w.canvas, int(x))
-	tapY := scale.ToFyneCoordinate(w.canvas, int(y))
+	tapX := internal.UnscaleInt(w.canvas, int(x))
+	tapY := internal.UnscaleInt(w.canvas, int(y))
 	pos := fyne.NewPos(tapX, tapY+tapYOffset)
 
 	w.canvas.tapUp(pos, int(tapID), func(wid fyne.Tappable, ev *fyne.PointEvent) {
@@ -459,8 +454,6 @@ var keyCodeMap = map[key.Code]fyne.KeyName{
 	key.CodeBackslash:          fyne.KeyBackslash,
 	key.CodeRightSquareBracket: fyne.KeyRightBracket,
 	key.CodeGraveAccent:        fyne.KeyBackTick,
-
-	key.CodeBackButton: mobile.KeyBack,
 }
 
 func keyToName(code key.Code) fyne.KeyName {
