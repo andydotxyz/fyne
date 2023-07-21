@@ -69,6 +69,11 @@ static int main_running = 0;
 void set_global(ANativeActivity *activity){
 	JNIEnv* env = activity->env;
     // Note that activity->clazz is mis-named.
+
+    if (current_class != NULL){
+        JNIEnv* env = activity->env;
+	    (*env)->DeleteGlobalRef(activity->env, current_class);
+	 }
     current_class = (*env)->GetObjectClass(env, activity->clazz);
 	current_class = (*env)->NewGlobalRef(env, current_class);
 	key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
@@ -79,14 +84,6 @@ void set_global(ANativeActivity *activity){
 	finish_method = find_method(env, current_class, "finish", "()V");
 
 	setCurrentContext(activity->vm, (*env)->NewGlobalRef(env, activity->clazz));
-}
-
-void delete_ref(ANativeActivity *activity){
-    if (current_class != NULL){
-        JNIEnv* env = activity->env;
-	    (*env)->DeleteGlobalRef(activity->env, current_class);
-	 }
-	current_class = NULL;
 }
 
 // Entry point from our subclassed NativeActivity.

@@ -50,7 +50,6 @@ void showFileOpen(JNIEnv* env, char* mimes);
 void showFileSave(JNIEnv* env, char* mimes, char* filename);
 void finish(JNIEnv* env, jobject ctx);
 void set_global(ANativeActivity *activity);
-void delete_ref(ANativeActivity *activity);
 
 void Java_org_golang_app_GoNativeActivity_filePickerReturned(JNIEnv *env, jclass clazz, jstring str);
 */
@@ -123,12 +122,10 @@ func callMain(mainPC uintptr) {
 
 //export onStart
 func onStart(activity *C.ANativeActivity) {
-	C.set_global(activity)
 }
 
 //export onResume
 func onResume(activity *C.ANativeActivity) {
-	C.set_global(activity)
 }
 
 //export onSaveInstanceState
@@ -138,12 +135,10 @@ func onSaveInstanceState(activity *C.ANativeActivity, outSize *C.size_t) unsafe.
 
 //export onPause
 func onPause(activity *C.ANativeActivity) {
-	C.delete_ref(activity)
 }
 
 //export onStop
 func onStop(activity *C.ANativeActivity) {
-	C.delete_ref(activity)
 }
 
 //export onCreate
@@ -158,7 +153,6 @@ func onCreate(activity *C.ANativeActivity) {
 
 //export onDestroy
 func onDestroy(activity *C.ANativeActivity) {
-	C.delete_ref(activity)
 	activityDestroyed <- struct{}{}
 }
 
