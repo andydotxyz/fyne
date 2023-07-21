@@ -82,8 +82,10 @@ void set_global(ANativeActivity *activity){
 }
 
 void delete_ref(ANativeActivity *activity){
-    if (current_class != NULL)
+    if (current_class != NULL){
+        JNIEnv* env = activity->env;
 	    (*env)->DeleteGlobalRef(activity->env, current_class);
+	 }
 	current_class = NULL;
 }
 
