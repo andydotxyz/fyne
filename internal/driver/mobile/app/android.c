@@ -81,6 +81,10 @@ void set_global(ANativeActivity *activity){
 	setCurrentContext(activity->vm, (*env)->NewGlobalRef(env, activity->clazz));
 }
 
+void delete_ref(ANativeActivity *activity){
+	(*env)->DeleteGlobalRef(activity->env, current_class);
+}
+
 // Entry point from our subclassed NativeActivity.
 //
 // By here, the Go runtime has been initialized (as we are running in

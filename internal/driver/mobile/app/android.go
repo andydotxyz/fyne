@@ -50,6 +50,7 @@ void showFileOpen(JNIEnv* env, char* mimes);
 void showFileSave(JNIEnv* env, char* mimes, char* filename);
 void finish(JNIEnv* env, jobject ctx);
 void set_global(ANativeActivity *activity);
+void delete_ref(ANativeActivity *activity);
 
 void Java_org_golang_app_GoNativeActivity_filePickerReturned(JNIEnv *env, jclass clazz, jstring str);
 */
@@ -137,10 +138,12 @@ func onSaveInstanceState(activity *C.ANativeActivity, outSize *C.size_t) unsafe.
 
 //export onPause
 func onPause(activity *C.ANativeActivity) {
+	C.delete_ref(activity)
 }
 
 //export onStop
 func onStop(activity *C.ANativeActivity) {
+	C.delete_ref(activity)
 }
 
 //export onCreate
@@ -155,6 +158,7 @@ func onCreate(activity *C.ANativeActivity) {
 
 //export onDestroy
 func onDestroy(activity *C.ANativeActivity) {
+	C.delete_ref(activity)
 	activityDestroyed <- struct{}{}
 }
 
@@ -595,7 +599,7 @@ func processKey(env *C.JNIEnv, e *C.AInputEvent) int {
 	keyCode := C.AKeyEvent_getKeyCode(e)
 	if (keyCode == C.AKEYCODE_BACK) {
 		println("back ok")
-		return 0 // Handle back button press and return handle
+		return 1 // Handle back button press and return handle
 	} else if (keyCode == C.AKEYCODE_MENU) {
 		return 1 // Handle menu button press
 	}
