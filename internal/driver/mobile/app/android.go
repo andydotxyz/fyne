@@ -122,10 +122,12 @@ func callMain(mainPC uintptr) {
 
 //export onStart
 func onStart(activity *C.ANativeActivity) {
+	C.set_global(activity)
 }
 
 //export onResume
 func onResume(activity *C.ANativeActivity) {
+	C.set_global(activity)
 }
 
 //export onSaveInstanceState
@@ -214,6 +216,7 @@ func Finish() {
 		return nil
 	})
 }
+
 func windowConfigRead(activity *C.ANativeActivity) windowConfig {
 	aconfig := C.AConfiguration_new()
 	C.AConfiguration_fromAssetManager(aconfig, activity.assetManager)

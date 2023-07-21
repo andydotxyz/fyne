@@ -68,12 +68,10 @@ static int main_running = 0;
 
 void set_global(ANativeActivity *activity){
 	JNIEnv* env = activity->env;
-    // Note that activity->clazz is mis-named.
-
     if (current_class != NULL){
-        JNIEnv* env = activity->env;
-	    (*env)->DeleteGlobalRef(activity->env, current_class);
-	 }
+	   (*env)->DeleteGlobalRef(activity->env, current_class);
+	}
+    // Note that activity->clazz is mis-named.
     current_class = (*env)->GetObjectClass(env, activity->clazz);
 	current_class = (*env)->NewGlobalRef(env, current_class);
 	key_rune_method = find_static_method(env, current_class, "getRune", "(III)I");
@@ -82,7 +80,6 @@ void set_global(ANativeActivity *activity){
 	show_file_open_method = find_static_method(env, current_class, "showFileOpen", "(Ljava/lang/String;)V");
 	show_file_save_method = find_static_method(env, current_class, "showFileSave", "(Ljava/lang/String;Ljava/lang/String;)V");
 	finish_method = find_method(env, current_class, "finish", "()V");
-
 	setCurrentContext(activity->vm, (*env)->NewGlobalRef(env, activity->clazz));
 }
 
@@ -97,8 +94,7 @@ void set_global(ANativeActivity *activity){
 void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_t savedStateSize) {
 	if (!main_running) {
 		JNIEnv* env = activity->env;
-
-		set_global(activity);
+		set_global(activity); // useless? OnStart?
 
 		// Set FILESDIR
 		if (setenv("FILESDIR", activity->internalDataPath, 1) != 0) {
