@@ -55,6 +55,13 @@ static char* checkException(uintptr_t jnienv) {
 static void unlockJNI(JavaVM *vm) {
 	(*vm)->DetachCurrentThread(vm);
 }
+static void deletePrevCtx(JNIEnv* env,jobject ctx){
+    (*env)->DeleteGlobalRef(env, ctx);
+}
+static int is_null(jobject ctx){
+	if (ctx == NULL) return 1;
+	return 0;
+}
 */
 import "C"
 
@@ -80,6 +87,13 @@ var currentCtx C.jobject
 // The android.context.Context object must be a global reference.
 func SetCurrentContext(vm unsafe.Pointer, ctx uintptr) {
 	currentVM = (*C.JavaVM)(vm)
+	if int(C.is_null(currentCtx)) == 1 {
+		RunOnJVM(func(vm, jniEnv, ctx uintptr) error {
+			env := (*C.JNIEnv)(unsafe.Pointer(jniEnv)) // not a Go heap pointer
+			C.deletePrevCtx(env, C.jobject(ctx))
+			return nil
+		})
+	}
 	currentCtx = (C.jobject)(ctx)
 }
 
