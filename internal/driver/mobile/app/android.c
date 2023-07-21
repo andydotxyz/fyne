@@ -82,7 +82,9 @@ void set_global(ANativeActivity *activity){
 }
 
 void delete_ref(ANativeActivity *activity){
-	(*env)->DeleteGlobalRef(activity->env, current_class);
+    if (current_class != NULL)
+	    (*env)->DeleteGlobalRef(activity->env, current_class);
+	current_class = NULL;
 }
 
 // Entry point from our subclassed NativeActivity.
