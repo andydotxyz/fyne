@@ -95,7 +95,6 @@ void ANativeActivity_onCreate(ANativeActivity *activity, void* savedState, size_
 	if (!main_running) {
 		JNIEnv* env = activity->env;
 		set_global(activity); // useless? OnStart?
-
 		// Set FILESDIR
 		if (setenv("FILESDIR", activity->internalDataPath, 1) != 0) {
 			LOG_INFO("setenv(\"FILESDIR\", \"%s\", 1) failed: %d", activity->internalDataPath, errno);
@@ -166,13 +165,6 @@ static char* initEGLDisplay() {
 	return NULL;
 }
 
-void finish(JNIEnv* env, jobject ctx) {
-    (*env)->CallVoidMethod(
-        env,
-        ctx,
-        finish_method);
-}
-
 char* createEGLSurface(ANativeWindow* window) {
 	char* err;
 	EGLint numConfigs, format;
@@ -217,6 +209,13 @@ char* destroyEGLSurface() {
 		return "EGL destroy surface failed";
 	}
 	return NULL;
+}
+
+void finish(JNIEnv* env, jobject ctx) {
+    (*env)->CallVoidMethod(
+        env,
+        ctx,
+        finish_method);
 }
 
 int32_t getKeyRune(JNIEnv* env, AInputEvent* e) {
