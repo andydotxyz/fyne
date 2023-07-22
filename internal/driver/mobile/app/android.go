@@ -143,6 +143,18 @@ func onPause(activity *C.ANativeActivity) {
 func onStop(activity *C.ANativeActivity) {
 }
 
+func onBackPressed() {
+	k := key.Event{
+		Code:      key.CodeBackButton,
+		Direction: key.DirPress,
+	}
+	log.Println("Logging key event back")
+	theApp.events.In() <- k
+
+	k.Direction = key.DirRelease
+	theApp.events.In() <- k
+}
+
 //export onCreate
 func onCreate(activity *C.ANativeActivity) {
 	// Set the initial configuration.
@@ -596,6 +608,7 @@ func processKey(env *C.JNIEnv, e *C.AInputEvent) int {
 	keyCode := C.AKeyEvent_getKeyCode(e)
 	if (keyCode == C.AKEYCODE_BACK) {
 		println("back ok")
+		go onBackPressed()
 		return 1 // Handle back button press and return handle
 	} else if (keyCode == C.AKEYCODE_MENU) {
 		return 1 // Handle menu button press
