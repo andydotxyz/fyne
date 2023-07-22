@@ -78,9 +78,9 @@ func main(f func(App)) {
 		}
 	}
 }
-func Finish() {
 
-}
+func Finish() {}
+
 //export onResize
 func onResize(w, h int) {
 	// TODO(nigeltao): don't assume 72 DPI. DisplayWidth and DisplayWidthMM
