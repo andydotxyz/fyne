@@ -103,9 +103,9 @@ func (a *app) loop(ctx C.GLintptr) {
 		}
 	}
 }
-func Finish() {
 
-}
+func Finish() {}
+
 var drawDone = make(chan struct{})
 
 // drawgl is used by Cocoa to occasionally request screen updates.
