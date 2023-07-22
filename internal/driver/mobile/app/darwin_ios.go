@@ -146,9 +146,9 @@ func updateConfig(width, height, orientation int32) {
 	}
 	theApp.events.In() <- paint.Event{External: true}
 }
-func Finish() {
 
-}
+func Finish() {}
+
 // touchIDs is the current active touches. The position in the array
 // is the ID, the value is the UITouch* pointer value.
 //
