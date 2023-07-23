@@ -143,16 +143,21 @@ func onPause(activity *C.ANativeActivity) {
 func onStop(activity *C.ANativeActivity) {
 }
 
-func onBackPressed() {
-	k := key.Event{
-		Code:      key.CodeBackButton,
-		Direction: key.DirPress,
-	}
-	log.Println("Logging key event back")
-	theApp.events.In() <- k
+var is_back_handled bool
 
-	k.Direction = key.DirRelease
-	theApp.events.In() <- k
+func onBackPressed() {
+	if is_back_handled {
+		k := key.Event{
+			Code:      key.CodeBackButton,
+			Direction: key.DirPress,
+		}
+		log.Println("Logging key event back")
+		theApp.events.In() <- k
+		k.Direction = key.DirRelease
+		theApp.events.In() <- k
+		return 1
+	}
+	return 0
 }
 
 //export onCreate
@@ -607,9 +612,7 @@ func processKey(env *C.JNIEnv, e *C.AInputEvent) int {
 	}
 	keyCode := C.AKeyEvent_getKeyCode(e)
 	if (keyCode == C.AKEYCODE_BACK) {
-		println("back ok")
-		go onBackPressed()
-		return 1 // Handle back button press and return handle
+		return onBackPressed() // Handle back button press and return handle
 	} else if (keyCode == C.AKEYCODE_MENU) {
 		return 1 // Handle menu button press
 	}
@@ -629,7 +632,7 @@ func processKey(env *C.JNIEnv, e *C.AInputEvent) int {
 		k.Direction = key.DirNone
 	}
 	// TODO(crawshaw): set Modifiers.
-	go func() {theApp.events.In() <- k}()
+	theApp.events.In() <- k
 	return 0
 }
 
