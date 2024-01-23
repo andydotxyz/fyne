@@ -1951,12 +1951,12 @@ func (r *entryContentRenderer) buildSelection() {
 		}
 
 		// translate columns and row into draw coordinates
-		x1, y1 := getCoordinates(startCol, row)
-		x2, _ := getCoordinates(endCol, row)
+		x1, _ := getCoordinates(startCol, row)
+		x2, y2 := getCoordinates(endCol, row)
 
 		// resize and reposition each rectangle
 		r.selection[i].Resize(fyne.NewSize(x2-x1+1, lineHeight))
-		r.selection[i].Move(fyne.NewPos(x1-1, y1))
+		r.selection[i].Move(fyne.NewPos(x1-1, y2))
 	}
 }
 

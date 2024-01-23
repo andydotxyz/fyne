@@ -82,28 +82,82 @@ func DrawString(dst draw.Image, s string, color color.Color, f []font.Face, font
 		Color:    color,
 	}
 
-	// TODO avoid shaping twice!
-	sh := &shaping.HarfbuzzShaper{}
-	out := sh.Shape(shaping.Input{
-		Text:     []rune(s),
-		RunStart: 0,
-		RunEnd:   len(s),
-		Face:     f[0],
-		Size:     fixed.I(int(fontSize * r.PixScale)),
-	})
+	if s == " " {
+		return
+	}
 
-	advance := float32(0)
-	y := int(math.Ceil(float64(fixed266ToFloat32(out.LineBounds.Ascent))))
-	walkString(f, s, float32ToFixed266(fontSize), tabWidth, &advance, scale, func(run shaping.Output, x float32) {
-		if len(run.Glyphs) == 1 {
-			if run.Glyphs[0].GlyphID == 0 {
-				r.DrawStringAt(string([]rune{0xfffd}), dst, int(x), y, f[0])
-				return
+	paint := func(seg shaping.Output, x, y float32) {
+		r.DrawShapedRunAt(seg, dst, int(x), int(y))
+	}
+	processString(s, f, fontSize, scale, tabWidth, paint)
+}
+
+func processString(s string, f []font.Face, fontSize, scale float32, tabWidth int, cb func(shaping.Output, float32, float32)) (size fyne.Size, advance float32) {
+	sh := &shaping.HarfbuzzShaper{}
+	s = strings.ReplaceAll(s, "\r", "")
+	rs := []rune(s)
+
+	x := float32(0)
+	height := float32(0)
+	start := 0
+	end := len(rs)
+	for i, c := range rs {
+		if c == '\t' {
+			if i > start {
+				inset, a := processSubString(rs[start:i], sh, f, fontSize, scale, x, cb)
+				x = a
+				height = inset.Height
 			}
+
+			spacew := scale * fontTabSpaceSize
+			x = tabStop(spacew, x, tabWidth)
+			start = i + 1
+		}
+	}
+
+	if start < end {
+		trail, a := processSubString(rs[start:], sh, f, fontSize, scale, x, cb)
+		x = a
+		height = trail.Height
+	}
+	return fyne.NewSize(x, height), x
+}
+
+func processSubString(str []rune, sh shaping.Shaper, f []font.Face, fontSize, scale float32, startX float32,
+	cb func(run shaping.Output, x, y float32)) (size fyne.Size, advance float32) {
+	in := shaping.Input{
+		Text:     str,
+		RunStart: 0,
+		RunEnd:   len(str),
+		Size:     fixed.I(int(fontSize * scale)),
+	}
+	seg := shaping.Segmenter{}
+	runs := seg.Split(in, fixedFontmap(f))
+
+	base := float32(0)
+	line := make(shaping.Line, len(runs))
+	for i, run := range runs {
+		line[i] = sh.Shape(run)
+
+		asc := fixed266ToFloat32(line[i].LineBounds.Ascent)
+		if asc > base {
+			base = asc
+		}
+	}
+
+	advance = startX
+	thickness := float32(0)
+	for _, run := range line {
+		sz, adv := processFontRun(run, float32ToFixed266(fontSize), base, &advance, cb)
+		if sz.Height > thickness {
+			thickness = sz.Height
 		}
 
-		r.DrawShapedRunAt(run, dst, int(x), y)
-	})
+		if adv >= advance {
+			advance = adv
+		}
+	}
+	return fyne.NewSize(advance, thickness), advance
 }
 
 func loadMeasureFont(data fyne.Resource) font.Face {
@@ -119,7 +173,11 @@ func loadMeasureFont(data fyne.Resource) font.Face {
 // MeasureString returns how far dot would advance by drawing s with f.
 // Tabs are translated into a dot location change.
 func MeasureString(f []font.Face, s string, textSize float32, tabWidth int) (size fyne.Size, advance float32) {
-	return walkString(f, s, float32ToFixed266(textSize), tabWidth, &advance, 1, func(shaping.Output, float32) {})
+	if s == " " {
+		return // TODO - space currently has no measurable size, this needs to be fixed for consistency!
+	}
+
+	return processString(s, f, textSize, 1, tabWidth, func(shaping.Output, float32, float32) {})
 }
 
 // RenderedTextSize looks up how big a string would be if drawn on screen.
@@ -158,93 +216,35 @@ func tabStop(spacew, x float32, tabWidth int) float32 {
 	return tabw * float32(tabs)
 }
 
-func walkString(faces []font.Face, s string, textSize fixed.Int26_6, tabWidth int, advance *float32, scale float32,
-	cb func(run shaping.Output, x float32)) (size fyne.Size, base float32) {
-	s = strings.ReplaceAll(s, "\r", "")
+func processFontRun(run shaping.Output, textSize fixed.Int26_6, y float32, advance *float32,
+	cb func(run shaping.Output, x, y float32)) (size fyne.Size, base float32) {
 
-	runes := []rune(s)
-	in := shaping.Input{
-		Text:      []rune{' '},
-		RunStart:  0,
-		RunEnd:    1,
-		Direction: di.DirectionLTR,
-		Face:      faces[0],
-		Size:      textSize,
-	}
-	shaper := &shaping.HarfbuzzShaper{}
-	out := shaper.Shape(in)
-
-	in.Text = runes
-	in.RunStart = 0
-	in.RunEnd = len(runes)
-
-	x := float32(0)
-	spacew := scale * fontTabSpaceSize
-	ins := shaping.SplitByFontGlyphs(in, faces)
-	for _, in := range ins {
-		inEnd := in.RunEnd
-
-		pending := false
-		for i, r := range in.Text[in.RunStart:in.RunEnd] {
-			if r == '\t' {
-				if pending {
-					in.RunEnd = i
-					out = shaper.Shape(in)
-					x = shapeCallback(shaper, in, out, x, scale, cb)
-				}
-				x = tabStop(spacew, x, tabWidth)
-
-				in.RunStart = i + 1
-				in.RunEnd = inEnd
-				pending = false
-			} else {
-				pending = true
+	if len(run.Glyphs) == 1 {
+		if run.Glyphs[0].GlyphID == 0 {
+			in := shaping.Input{
+				Text:      []rune{0xfffd},
+				RunStart:  0,
+				RunEnd:    1,
+				Direction: di.DirectionLTR,
+				Face:      run.Face,
+				Size:      textSize,
 			}
+			shaper := &shaping.HarfbuzzShaper{}
+			out := shaper.Shape(in)
+			y := fixed266ToFloat32(out.LineBounds.Ascent)
+
+			cb(out, *advance, y)
+			*advance = fixed266ToFloat32(out.Advance) + *advance
+
+			return fyne.NewSize(*advance, fixed266ToFloat32(run.LineBounds.LineThickness())),
+				fixed266ToFloat32(run.LineBounds.Ascent)
 		}
-
-		x = shapeCallback(shaper, in, out, x, scale, cb)
 	}
 
-	*advance = x
-	return fyne.NewSize(*advance, fixed266ToFloat32(out.LineBounds.LineThickness())),
-		fixed266ToFloat32(out.LineBounds.Ascent)
-}
-
-func shapeCallback(shaper shaping.Shaper, in shaping.Input, out shaping.Output, x, scale float32, cb func(shaping.Output, float32)) float32 {
-	out = shaper.Shape(in)
-	glyphs := out.Glyphs
-	start := 0
-	pending := false
-	adv := fixed.I(0)
-	for i, g := range out.Glyphs {
-		if g.GlyphID == 0 {
-			if pending {
-				out.Glyphs = glyphs[start:i]
-				cb(out, x)
-				x += fixed266ToFloat32(adv) * scale
-				adv = 0
-			}
-
-			out.Glyphs = glyphs[i : i+1]
-			cb(out, x)
-			x += fixed266ToFloat32(glyphs[i].XAdvance) * scale
-			adv = 0
-
-			start = i + 1
-			pending = false
-		} else {
-			pending = true
-		}
-		adv += g.XAdvance
-	}
-
-	if pending {
-		out.Glyphs = glyphs[start:]
-		cb(out, x)
-		x += fixed266ToFloat32(adv) * scale
-		adv = 0
-	}
-	return x + fixed266ToFloat32(adv)*scale
+	cb(run, *advance, y)
+	*advance = fixed266ToFloat32(run.Advance) + *advance
+	return fyne.NewSize(*advance, fixed266ToFloat32(run.LineBounds.LineThickness())),
+		fixed266ToFloat32(run.LineBounds.Ascent)
 }
 
 type FontCacheItem struct {
@@ -252,3 +252,14 @@ type FontCacheItem struct {
 }
 
 var fontCache = &sync.Map{} // map[fyne.TextStyle]*FontCacheItem
+
+type fixedFontmap []font.Face
+
+func (ff fixedFontmap) ResolveFace(r rune) font.Face {
+	for _, f := range ff {
+		if _, has := f.NominalGlyph(r); has {
+			return f
+		}
+	}
+	return ff[0]
+}
