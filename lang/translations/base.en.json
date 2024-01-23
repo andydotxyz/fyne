@@ -1,3 +1,4 @@
 {
-  "Quit": "Quit"
+  "Quit": "Quit",
+  "hello_username": "Hello {{.username}}"
 }
