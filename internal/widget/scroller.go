@@ -50,7 +50,7 @@ func (r *scrollBarRenderer) MinSize() fyne.Size {
 }
 
 func (r *scrollBarRenderer) Refresh() {
-	r.background.FillColor = theme.ScrollBarColor()
+	r.background.FillColor = theme.ColorForWidget(theme.ColorNameScrollBar, r.scrollBar)
 	r.background.Refresh()
 }
 
@@ -67,7 +67,7 @@ type scrollBar struct {
 }
 
 func (b *scrollBar) CreateRenderer() fyne.WidgetRenderer {
-	background := canvas.NewRectangle(theme.ScrollBarColor())
+	background := canvas.NewRectangle(theme.ColorForWidget(theme.ColorNameScrollBar, b))
 	r := &scrollBarRenderer{
 		scrollBar:  b,
 		background: background,
@@ -141,25 +141,29 @@ func (r *scrollBarAreaRenderer) Layout(_ fyne.Size) {
 }
 
 func (r *scrollBarAreaRenderer) MinSize() fyne.Size {
-	min := theme.ScrollBarSize()
+	th := theme.CurrentForWidget(r.bar)
+	barSize := th.Size(theme.SizeNameScrollBar)
+
+	min := barSize
 	if !r.area.isLarge {
-		min = theme.ScrollBarSmallSize() * 2
+		min = th.Size(theme.SizeNameScrollBarSmall) * 2
 	}
 	switch r.area.orientation {
 	case scrollBarOrientationHorizontal:
-		return fyne.NewSize(theme.ScrollBarSize(), min)
+		return fyne.NewSize(barSize, min)
 	default:
-		return fyne.NewSize(min, theme.ScrollBarSize())
+		return fyne.NewSize(min, barSize)
 	}
 }
 
 func (r *scrollBarAreaRenderer) Refresh() {
 	r.Layout(r.area.Size())
-	canvas.Refresh(r.bar)
+	r.bar.Refresh()
 }
 
 func (r *scrollBarAreaRenderer) barSizeAndOffset(contentOffset, contentLength, scrollLength float32) (length, width, lengthOffset, widthOffset float32) {
-	scrollBarSize := theme.ScrollBarSize()
+	th := theme.CurrentForWidget(r.bar)
+	scrollBarSize := th.Size(theme.SizeNameScrollBar)
 	if scrollLength < contentLength {
 		portion := scrollLength / contentLength
 		length = float32(int(scrollLength)) * portion
@@ -173,7 +177,7 @@ func (r *scrollBarAreaRenderer) barSizeAndOffset(contentOffset, contentLength, s
 	if r.area.isLarge {
 		width = scrollBarSize
 	} else {
-		widthOffset = theme.ScrollBarSmallSize()
+		widthOffset = th.Size(theme.SizeNameScrollBarSmall)
 		width = widthOffset
 	}
 	return
@@ -296,6 +300,9 @@ func (r *scrollContainerRenderer) Refresh() {
 	}
 
 	r.oldMinSize = newMin
+
+	r.vertArea.Refresh()
+	r.horizArea.Refresh()
 	r.Layout(size)
 }
 
@@ -443,6 +450,8 @@ func (s *Scroll) SetMinSize(size fyne.Size) {
 func (s *Scroll) Refresh() {
 	s.updateOffset(0, 0)
 	s.refreshWithoutOffsetUpdate()
+
+	s.Content.Refresh()
 }
 
 // Resize is called when this scroller should change size. We refresh to ensure the scroll bars are updated.
