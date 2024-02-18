@@ -19,7 +19,6 @@ func (d *gLDriver) initGLFW() {
 		}
 
 		initCursors()
-		d.startDrawThread()
 	})
 }
 
