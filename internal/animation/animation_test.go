@@ -73,6 +73,10 @@ func TestGLDriver_StopAnimationImmediatelyAndInsideTick(t *testing.T) {
 	go tick(run) // simulate a graphics draw loop
 	run.Stop(a)
 
+	run.animationMutex.RLock()
+	assert.Zero(t, len(run.animations))
+	run.animationMutex.RUnlock()
+
 	// stopping animation inside tick function
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
