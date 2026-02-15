@@ -250,6 +250,17 @@ func TestRichTextMarkdown_Separator(t *testing.T) {
 	}
 }
 
+func TestRichTextMarkdown_TextEncode(t *testing.T) {
+	r := NewRichTextFromMarkdown("a&mdash;b")
+
+	assert.GreaterOrEqual(t, len(r.Segments), 1)
+	if _, ok := r.Segments[0].(*TextSegment); !ok {
+		t.Error("Segment should be a text segment")
+	}
+
+	assert.Equal(t, "a—b", r.Segments[0].(*TextSegment).Text)
+}
+
 func TestRichTextMarkdown_Paragraph(t *testing.T) {
 	r := NewRichTextFromMarkdown("foo")
 

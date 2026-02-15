@@ -1,6 +1,7 @@
 package widget
 
 import (
+	"html"
 	"io"
 	"net/url"
 	"strings"
@@ -73,11 +74,11 @@ func renderNode(source []byte, n ast.Node, blockquote bool) ([]RichTextSegment, 
 		text := forceIntoHeadingText(source, n)
 		switch t.Level {
 		case 1:
-			return []RichTextSegment{&TextSegment{Style: RichTextStyleHeading, Text: text}}, nil
+			return []RichTextSegment{&TextSegment{Style: RichTextStyleHeading, Text: decodeText(text)}}, nil
 		case 2:
-			return []RichTextSegment{&TextSegment{Style: RichTextStyleSubHeading, Text: text}}, nil
+			return []RichTextSegment{&TextSegment{Style: RichTextStyleSubHeading, Text: decodeText(text)}}, nil
 		default:
-			textSegment := TextSegment{Style: RichTextStyleParagraph, Text: text}
+			textSegment := TextSegment{Style: RichTextStyleParagraph, Text: decodeText(text)}
 			textSegment.Style.TextStyle.Bold = true
 			return []RichTextSegment{&textSegment}, nil
 		}
@@ -86,7 +87,7 @@ func renderNode(source []byte, n ast.Node, blockquote bool) ([]RichTextSegment, 
 	case *ast.Link:
 		link, _ := url.Parse(string(t.Destination))
 		text := forceIntoText(source, n)
-		return []RichTextSegment{&HyperlinkSegment{Alignment: fyne.TextAlignLeading, Text: text, URL: link}}, nil
+		return []RichTextSegment{&HyperlinkSegment{Alignment: fyne.TextAlignLeading, Text: decodeText(text), URL: link}}, nil
 	case *ast.CodeSpan:
 		text := forceIntoText(source, n)
 		return []RichTextSegment{&TextSegment{Style: RichTextStyleCodeInline, Text: text}}, nil
@@ -108,9 +109,9 @@ func renderNode(source []byte, n ast.Node, blockquote bool) ([]RichTextSegment, 
 		text := forceIntoText(source, n)
 		switch t.Level {
 		case 2:
-			return []RichTextSegment{&TextSegment{Style: RichTextStyleStrong, Text: text}}, nil
+			return []RichTextSegment{&TextSegment{Style: RichTextStyleStrong, Text: decodeText(text)}}, nil
 		default:
-			return []RichTextSegment{&TextSegment{Style: RichTextStyleEmphasis, Text: text}}, nil
+			return []RichTextSegment{&TextSegment{Style: RichTextStyleEmphasis, Text: decodeText(text)}}, nil
 		}
 	case *ast.Text:
 		text := string(t.Value(source))
@@ -122,7 +123,7 @@ func renderNode(source []byte, n ast.Node, blockquote bool) ([]RichTextSegment, 
 		if blockquote {
 			return []RichTextSegment{&TextSegment{Style: RichTextStyleBlockquote, Text: text}}, nil
 		}
-		return []RichTextSegment{&TextSegment{Style: RichTextStyleInline, Text: text}}, nil
+		return []RichTextSegment{&TextSegment{Style: RichTextStyleInline, Text: decodeText(text)}}, nil
 	case *ast.Blockquote:
 		return renderChildren(source, n, true)
 	case *ast.Image:
@@ -189,4 +190,8 @@ func parseMarkdown(content string) []RichTextSegment {
 		fyne.LogError("Failed to parse markdown", err)
 	}
 	return r
+}
+
+func decodeText(text string) string {
+	return html.UnescapeString(text)
 }
