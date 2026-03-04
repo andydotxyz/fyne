@@ -150,7 +150,7 @@ func DrawLine(line *canvas.Line, vectorPad float32, scale func(float32) float32)
 // DrawPolygon rasterizes the given regular polygon object into an image.
 // The bounds of the output image will be increased by vectorPad to allow for stroke overflow at the edges.
 // The scale function is used to understand how many pixels are required per unit of size.
-func DrawPolygon(polygon *canvas.Polygon, vectorPad float32, scale func(float32) float32) *image.RGBA {
+func DrawPolygon(polygon *canvas.RegularPolygon, vectorPad float32, scale func(float32) float32) *image.RGBA {
 	size := polygon.Size()
 
 	width := int(scale(size.Width + vectorPad*2))

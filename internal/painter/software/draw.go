@@ -299,7 +299,7 @@ func drawOblongStroke(c fyne.Canvas, obj fyne.CanvasObject, width, height float3
 	draw.Draw(base, bounds, raw, image.Point{offX, offY}, draw.Over)
 }
 
-func drawPolygon(c fyne.Canvas, polygon *canvas.Polygon, pos fyne.Position, base *image.NRGBA, clip image.Rectangle) {
+func drawPolygon(c fyne.Canvas, polygon *canvas.RegularPolygon, pos fyne.Position, base *image.NRGBA, clip image.Rectangle) {
 	pad := painter.VectorPad(polygon)
 	scaledWidth := scale.ToScreenCoordinate(c, polygon.Size().Width+pad*2)
 	scaledHeight := scale.ToScreenCoordinate(c, polygon.Size().Height+pad*2)

@@ -26,7 +26,7 @@ var (
 	//go:embed shaders/simple_es.vert
 	shaderSimpleesVert []byte
 
-	//go:embed shaders/polygon_es.frag
+	//go:embed shaders/regular_polygon_es.frag
 	shaderPolygonesFrag []byte
 
 	//go:embed shaders/arc_es.frag

@@ -189,7 +189,7 @@ func (p *painter) drawObject(o fyne.CanvasObject, pos fyne.Position, frame fyne.
 		p.drawGradient(obj, p.newGlLinearGradientTexture, pos, frame)
 	case *canvas.RadialGradient:
 		p.drawGradient(obj, p.newGlRadialGradientTexture, pos, frame)
-	case *canvas.Polygon:
+	case *canvas.RegularPolygon:
 		p.drawPolygon(obj, pos, frame)
 	case *canvas.Arc:
 		p.drawArc(obj, pos, frame)
@@ -291,7 +291,7 @@ func (p *painter) drawOblong(obj fyne.CanvasObject, fill, stroke color.Color, st
 	p.logError()
 }
 
-func (p *painter) drawPolygon(polygon *canvas.Polygon, pos fyne.Position, frame fyne.Size) {
+func (p *painter) drawPolygon(polygon *canvas.RegularPolygon, pos fyne.Position, frame fyne.Size) {
 	if ((polygon.FillColor == color.Transparent || polygon.FillColor == nil) && (polygon.StrokeColor == color.Transparent || polygon.StrokeColor == nil || polygon.StrokeWidth == 0)) || polygon.Sides < 3 {
 		return
 	}

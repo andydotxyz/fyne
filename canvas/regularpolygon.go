@@ -7,13 +7,13 @@ import (
 )
 
 // Declare conformity with CanvasObject interface
-var _ fyne.CanvasObject = (*Polygon)(nil)
+var _ fyne.CanvasObject = (*RegularPolygon)(nil)
 
-// Polygon describes a colored regular polygon primitive in a Fyne canvas.
+// RegularPolygon describes a colored regular polygon primitive in a Fyne canvas.
 // The rendered portion will be in the center of the available space.
 //
-// Since: 2.7
-type Polygon struct {
+// Since: 2.8
+type RegularPolygon struct {
 	baseObject
 
 	FillColor    color.Color // The polygon fill color
@@ -25,14 +25,14 @@ type Polygon struct {
 }
 
 // Hide will set this polygon to not be visible
-func (r *Polygon) Hide() {
+func (r *RegularPolygon) Hide() {
 	r.baseObject.Hide()
 
 	repaint(r)
 }
 
 // Move the polygon to a new position, relative to its parent / canvas
-func (r *Polygon) Move(pos fyne.Position) {
+func (r *RegularPolygon) Move(pos fyne.Position) {
 	if r.Position() == pos {
 		return
 	}
@@ -43,13 +43,13 @@ func (r *Polygon) Move(pos fyne.Position) {
 }
 
 // Refresh causes this polygon to be redrawn with its configured state.
-func (r *Polygon) Refresh() {
+func (r *RegularPolygon) Refresh() {
 	Refresh(r)
 }
 
 // Resize on a polygon updates the new size of this object.
 // If it has a stroke width this will cause it to Refresh.
-func (r *Polygon) Resize(s fyne.Size) {
+func (r *RegularPolygon) Resize(s fyne.Size) {
 	if s == r.Size() {
 		return
 	}
@@ -59,9 +59,11 @@ func (r *Polygon) Resize(s fyne.Size) {
 	Refresh(r)
 }
 
-// NewPolygon returns a new Polygon instance
-func NewPolygon(sides uint, color color.Color) *Polygon {
-	return &Polygon{
+// NewPolygon returns a new RegularPolygon instance
+//
+// Since: 2.8
+func NewPolygon(sides uint, color color.Color) *RegularPolygon {
+	return &RegularPolygon{
 		Sides:     sides,
 		FillColor: color,
 	}

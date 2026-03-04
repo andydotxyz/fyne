@@ -21,7 +21,7 @@ func TestPolygon_FillColorSides(t *testing.T) {
 }
 
 func TestPolygon_SidesRotation(t *testing.T) {
-	polygon := &canvas.Polygon{
+	polygon := &canvas.RegularPolygon{
 		FillColor:    color.NRGBA{R: 255, G: 200, B: 0, A: 180},
 		StrokeColor:  color.Black,
 		StrokeWidth:  2,
@@ -61,7 +61,7 @@ func TestPolygon_SidesRotation(t *testing.T) {
 }
 
 func TestPolygon_RadiusMaximum(t *testing.T) {
-	polygon := &canvas.Polygon{
+	polygon := &canvas.RegularPolygon{
 		FillColor:    color.NRGBA{R: 255, G: 200, B: 0, A: 180},
 		StrokeColor:  color.Black,
 		CornerRadius: canvas.RadiusMaximum,
