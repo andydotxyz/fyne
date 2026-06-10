@@ -1,6 +1,6 @@
 module fyne.io/fyne/v2
 
-go 1.19
+go 1.21
 
 require (
 	fyne.io/systray v1.12.2
@@ -60,3 +60,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace golang.org/x/image v0.24.0 => github.com/fyne-io/go-image v0.24.2
