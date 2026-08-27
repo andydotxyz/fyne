@@ -210,6 +210,13 @@ func TestRichTextEntry_MarkdownMode_NoFalseMatch(t *testing.T) {
 	assert.Equal(t, []string{"2 * 3 * 4|"}, segmentDump(e))
 }
 
+func TestRichTextEntry_Markdown(t *testing.T) {
+	source := "# Title\n\nSome **bold** and *italic* text."
+	e := NewRichTextEntryFromMarkdown(source)
+
+	assert.Equal(t, source, e.Markdown())
+}
+
 func TestRichTextEntry_Undo(t *testing.T) {
 	e := NewRichTextEntryFromMarkdown("a **b** c")
 	e.CursorRow, e.CursorColumn = 0, 3
@@ -334,6 +341,15 @@ func TestRichTextEntry_AppendMarkdown(t *testing.T) {
 
 	assert.Equal(t, "first\nsecond", e.Text)
 	assert.Equal(t, []string{"first\n|", "second|b"}, segmentDump(e))
+}
+
+func TestRichTextEntry_MarkdownRoundTrip(t *testing.T) {
+	source := "# Title\n\nSome **bold** text\n\n## Second\n\nWith `code` and *emphasis*"
+	e := NewRichTextEntryFromMarkdown(source)
+	again := NewRichTextEntryFromMarkdown(e.Markdown())
+
+	assert.Equal(t, e.Text, again.Text)
+	assert.Equal(t, segmentDump(e), segmentDump(again))
 }
 
 func TestRichTextEntry_Disabled(t *testing.T) {

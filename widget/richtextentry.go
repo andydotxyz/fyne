@@ -115,6 +115,13 @@ func (e *RichTextEntry) AppendMarkdown(content string) {
 	e.setCursorOffset(pos)
 }
 
+// Markdown returns the content of this entry serialised back to markdown.
+//
+// Since: 2.9
+func (e *RichTextEntry) Markdown() string {
+	return segmentsToMarkdown(e.richProvider().Segments)
+}
+
 // SetStyleForRange applies the specified style to the text between the two rune
 // offsets, splitting segments where required. Positions outside the content are
 // clamped and a start at or after the end does nothing.
@@ -546,6 +553,122 @@ func flattenTable(t *TableSegment, out []RichTextSegment) []RichTextSegment {
 		row(r, RichTextStyleInline)
 	}
 	return out
+}
+
+// segmentsToMarkdown writes styled segments back out as markdown. Each line of
+// content becomes its own block, so that parsing the result returns content
+// with the same line structure.
+func segmentsToMarkdown(segments []RichTextSegment) string {
+	out := &strings.Builder{}
+	breaks := 0 // line breaks seen since the last content was written
+	atLineStart := true
+
+	write := func(text string, style RichTextStyle) {
+		if text == "" {
+			return
+		}
+		if breaks > 0 {
+			// each break starts a new block, which markdown separates by a blank line
+			out.WriteString(strings.Repeat("\n\n", breaks))
+			breaks, atLineStart = 0, true
+		}
+		if atLineStart {
+			out.WriteString(markdownBlockPrefix(style))
+			atLineStart = false
+		}
+
+		marks := markdownInlineMarks(style)
+		out.WriteString(marks)
+		out.WriteString(text)
+		out.WriteString(reverseMarks(marks))
+	}
+
+	for _, seg := range segments {
+		switch t := seg.(type) {
+		case *TextSegment:
+			for i, line := range strings.Split(t.Text, newLineChar) {
+				if i > 0 {
+					breaks++
+				}
+				write(line, t.Style)
+			}
+		case *HyperlinkSegment:
+			link := ""
+			if t.URL != nil {
+				link = t.URL.String()
+			}
+			write("["+t.Text+"]("+link+")", RichTextStyleInline)
+		case *ImageSegment:
+			source := ""
+			if t.Source != nil {
+				source = t.Source.String()
+			}
+			write("!["+t.Title+"]("+source+")", RichTextStyleInline)
+		default:
+			write(seg.Textual(), RichTextStyleInline)
+		}
+	}
+	return out.String()
+}
+
+func markdownBlockPrefix(style RichTextStyle) string {
+	prefix := ""
+	if style.QuotingDepth > 0 {
+		prefix = strings.Repeat("> ", style.QuotingDepth)
+	}
+
+	switch style.SizeName {
+	case theme.SizeNameHeadingText:
+		return prefix + "# "
+	case theme.SizeNameSubHeadingText:
+		return prefix + "## "
+	}
+	return prefix
+}
+
+func markdownInlineMarks(style RichTextStyle) string {
+	if style.SizeName == theme.SizeNameHeadingText || style.SizeName == theme.SizeNameSubHeadingText {
+		return "" // the heading prefix already covers the emphasis
+	}
+
+	marks := ""
+	if style.TextStyle.Strikethrough {
+		marks += "~~"
+	}
+	if style.TextStyle.Bold {
+		marks += "**"
+	}
+	if style.TextStyle.Italic && style.QuotingDepth == 0 {
+		marks += "*"
+	}
+	if style.codeInline {
+		marks += "`"
+	}
+	return marks
+}
+
+// reverseMarks flips opening markdown markers into the matching closers.
+func reverseMarks(marks string) string {
+	var out []string
+	for i := 0; i < len(marks); {
+		switch {
+		case strings.HasPrefix(marks[i:], "~~"):
+			out = append(out, "~~")
+			i += 2
+		case strings.HasPrefix(marks[i:], "**"):
+			out = append(out, "**")
+			i += 2
+		default:
+			out = append(out, marks[i:i+1])
+			i++
+		}
+	}
+
+	reversed := &strings.Builder{}
+	for i := len(out) - 1; i >= 0; i-- {
+		reversed.WriteString(out[i])
+	}
+	return reversed.String()
 }
 
 var markdownInlineStyles = []struct {
