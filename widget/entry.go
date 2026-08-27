@@ -113,6 +113,10 @@ type Entry struct {
 	// undoStack stores the data necessary for undo/redo functionality
 	// See entryUndoStack for implementation details.
 	undoStack entryUndoStack
+
+	// rich records that the content of this entry is held as styled segments,
+	// managed by a RichTextEntry, rather than being generated from Text.
+	rich bool
 }
 
 // NewEntry creates a new single line entry widget.
@@ -234,7 +238,7 @@ func (e *Entry) CursorPosition() fyne.Position {
 
 	size := provider.lineSizeToColumn(e.CursorColumn, e.CursorRow, textSize, innerPad)
 	xPos := size.Width
-	yPos := size.Height * float32(e.CursorRow)
+	yPos, _ := provider.rowGeometry(e.CursorRow)
 
 	return fyne.NewPos(xPos-(inputBorder/2), yPos+innerPad-inputBorder)
 }
@@ -1288,11 +1292,26 @@ func (e *Entry) syncSegments() {
 	text := e.textProvider()
 	text.Wrapping = wrap
 
-	textSegment := text.Segments[0].(*TextSegment)
-	textSegment.Text = e.Text
-	textSegment.Style.ColorName = colName
-	textSegment.Style.concealed = e.Password
-	textSegment.Style.TextStyle = e.TextStyle
+	if e.rich {
+		// Ignore segments we don't control, just style the text type
+		for _, seg := range text.Segments {
+			textSegment, ok := seg.(*TextSegment)
+			if !ok {
+				continue
+			}
+
+			switch textSegment.Style.ColorName {
+			case theme.ColorNameForeground, theme.ColorNameDisabled, "":
+				textSegment.Style.ColorName = colName
+			}
+		}
+	} else {
+		textSegment := text.Segments[0].(*TextSegment)
+		textSegment.Text = e.Text
+		textSegment.Style.ColorName = colName
+		textSegment.Style.concealed = e.Password
+		textSegment.Style.TextStyle = e.TextStyle
+	}
 
 	colName = theme.ColorNamePlaceHolder
 	if disabled {
@@ -1302,10 +1321,10 @@ func (e *Entry) syncSegments() {
 	placeholder := e.placeholderProvider()
 	placeholder.Wrapping = wrap
 
-	textSegment = placeholder.Segments[0].(*TextSegment)
-	textSegment.Style.ColorName = colName
-	textSegment.Style.TextStyle = e.TextStyle
-	textSegment.Text = e.PlaceHolder
+	placeholderSegment := placeholder.Segments[0].(*TextSegment)
+	placeholderSegment.Style.ColorName = colName
+	placeholderSegment.Style.TextStyle = e.TextStyle
+	placeholderSegment.Text = e.PlaceHolder
 }
 
 func (e *Entry) syncSelectable() {
@@ -1317,18 +1336,23 @@ func (e *Entry) syncSelectable() {
 	e.sel.cursorRow, e.sel.cursorColumn = e.CursorRow, e.CursorColumn
 }
 
+// initTextProvider prepares the rich text that renders this entry's content.
+func (e *Entry) initTextProvider() {
+	e.text.Scroll = widget.ScrollNone
+	e.text.inset = fyne.NewSize(0, e.Theme().Size(theme.SizeNameInputBorder))
+}
+
 // textProvider returns the text handler for this entry
 func (e *Entry) textProvider() *RichText {
-	if len(e.text.Segments) > 0 {
-		return &e.text
+	if len(e.text.Segments) > 0 || e.rich {
+		return &e.text // a rich entry owns its segments, even if momentarily empty
 	}
 
 	if e.Text != "" {
 		e.dirty = true
 	}
 
-	e.text.Scroll = widget.ScrollNone
-	e.text.inset = fyne.NewSize(0, e.Theme().Size(theme.SizeNameInputBorder))
+	e.initTextProvider()
 	e.text.Segments = []RichTextSegment{&TextSegment{Style: RichTextStyleInline, Text: e.Text}}
 	return &e.text
 }
@@ -1420,6 +1444,11 @@ func (e *Entry) updateText(text string, fromBinding bool) bool {
 		if wasEmpty != empty {
 			e.onRequiredChanged(!empty)
 		}
+	}
+	if e.rich && !e.text.contentIs(text) {
+		// content was set from outside the segment model, using SetText or a data
+		// binding, so there is no styling information to preserve
+		e.text.Segments = []RichTextSegment{&TextSegment{Style: RichTextStyleInline, Text: text}}
 	}
 	e.syncSegments()
 	e.text.updateRowBounds()
@@ -1929,6 +1958,9 @@ func (r *entryContentRenderer) moveCursor() {
 	inputBorder := th.Size(theme.SizeNameInputBorder)
 
 	lineHeight := r.content.entry.text.charMinSize(r.content.entry.Password, r.content.entry.TextStyle, textSize).Height
+	if _, rowHeight := r.content.entry.text.rowGeometry(r.content.entry.CursorRow); rowHeight > lineHeight {
+		lineHeight = rowHeight // rich content rows may be taller than the standard text size
+	}
 	r.cursor.Resize(fyne.NewSize(inputBorder, lineHeight))
 	r.cursor.Move(r.content.entry.CursorPosition())
 

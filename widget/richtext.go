@@ -46,6 +46,7 @@ type RichText struct {
 	visualCache    map[RichTextSegment]visualCacheEntry
 	visualCacheGen int64
 	minCache       fyne.Size
+	geometryValid  bool // whether rowBounds carries up to date row positions
 }
 
 type visualCacheEntry struct {
@@ -147,6 +148,19 @@ func (t *RichText) String() string {
 		ret.WriteString(seg.Textual())
 	}
 	return ret.String()
+}
+
+// contentIs reports whether the segments spell out exactly the given text.
+// It avoids building a string to compare against, as this runs on every edit.
+func (t *RichText) contentIs(text string) bool {
+	for _, seg := range t.Segments {
+		content := seg.Textual()
+		if !strings.HasPrefix(text, content) {
+			return false
+		}
+		text = text[len(content):]
+	}
+	return text == ""
 }
 
 // charMinSize returns the average char size to use for internal computation
@@ -326,24 +340,36 @@ func (t *RichText) lineSizeToColumn(col, row int, textSize, innerPad float32) fy
 	if bound == nil {
 		return t.charMinSize(false, fyne.TextStyle{}, textSize)
 	}
+
+	leftPad := bound.indent
+	if boundQuoting(bound) > 0 {
+		leftPad, _ = rowPaddingAndAlign(*bound, t.Theme().Size(theme.SizeNameLineSpacing), fyne.TextAlignLeading)
+	}
 	for i, seg := range bound.segments {
 		var size fyne.Size
+		measureText := rowSegmentRunes(bound, i)
+		partial := false
+		if col < counted+len(measureText) {
+			measureText = measureText[0 : col-counted]
+			partial = true
+			last = true
+		}
+		counted += len(measureText)
+
 		if text, ok := seg.(*TextSegment); ok {
-			start := 0
-			if i == 0 {
-				start = bound.begin
-			}
-			measureText := []rune(text.Text)[start:]
-			if col < counted+len(measureText) {
-				measureText = measureText[0 : col-counted]
-				last = true
-			}
 			if concealed(seg) {
 				measureText = []rune(strings.Repeat(passwordChar, len(measureText)))
 			}
-			counted += len(measureText)
 
 			size, _ = fyne.CurrentApp().Driver().RenderedTextSize(string(measureText), text.size(), text.Style.TextStyle, nil)
+		} else if link, ok := seg.(*HyperlinkSegment); ok {
+			sizeName := link.SizeName
+			if sizeName == "" {
+				sizeName = theme.SizeNameText
+			}
+			size, _ = fyne.CurrentApp().Driver().RenderedTextSize(string(measureText), t.Theme().Size(sizeName), link.TextStyle, nil)
+		} else if partial {
+			size = fyne.Size{} // the cursor is before this object, so it adds no width
 		} else {
 			size = t.cachedSegmentVisual(seg, 0).MinSize()
 		}
@@ -354,7 +380,7 @@ func (t *RichText) lineSizeToColumn(col, row int, textSize, innerPad float32) fy
 			break
 		}
 	}
-	return total.Add(fyne.NewSize(innerPad-t.inset.Width, 0))
+	return total.Add(fyne.NewSize(innerPad-t.inset.Width+leftPad, 0))
 }
 
 // Row returns the characters in the row specified.
@@ -363,20 +389,10 @@ func (t *RichText) row(row int) []rune {
 	if row < 0 || row >= t.rows() {
 		return nil
 	}
-	bound := t.rowBounds[row]
+	bound := &t.rowBounds[row]
 	var ret []rune
-	for i, seg := range bound.segments {
-		if text, ok := seg.(*TextSegment); ok {
-			if i == 0 {
-				if len(bound.segments) == 1 {
-					ret = append(ret, []rune(text.Text)[bound.begin:bound.end]...)
-				} else {
-					ret = append(ret, []rune(text.Text)[bound.begin:]...)
-				}
-			} else if i == len(bound.segments)-1 && len(bound.segments) > 1 && bound.end != 0 {
-				ret = append(ret, []rune(text.Text)[:bound.end]...)
-			}
-		}
+	for i := range bound.segments {
+		ret = append(ret, rowSegmentRunes(bound, i)...)
 	}
 	return ret
 }
@@ -562,6 +578,160 @@ func (t *RichText) updateRowBounds() {
 
 	iterateSegments(t.Segments, 0)
 	t.rowBounds = bounds
+	t.geometryValid = false // calculated on demand, as this runs on every edit
+}
+
+// ensureRowGeometry calculates the row positions if they are not already known.
+func (t *RichText) ensureRowGeometry() {
+	if t.geometryValid {
+		return
+	}
+
+	t.geometryValid = true
+	t.updateRowGeometry()
+}
+
+// updateRowGeometry records the vertical offset and height of each row.
+func (t *RichText) updateRowGeometry() {
+	if t.uniformRowGeometry() {
+		return
+	}
+
+	th := t.Theme()
+	lineSpacing := th.Size(theme.SizeNameLineSpacing)
+	textSize := th.Size(theme.SizeNameText)
+
+	yPos := float32(0)
+	for i := range t.rowBounds {
+		bound := &t.rowBounds[i]
+		height := float32(0)
+		for j, seg := range bound.segments {
+			var segHeight float32
+			switch s := seg.(type) {
+			case *TextSegment:
+				segHeight = fyne.MeasureText(string(rowSegmentRunes(bound, j)), s.size(), s.Style.TextStyle).Height
+			case *HyperlinkSegment:
+				sizeName := s.SizeName
+				if sizeName == "" {
+					sizeName = theme.SizeNameText
+				}
+				segHeight = fyne.MeasureText(string(rowSegmentRunes(bound, j)), th.Size(sizeName), s.TextStyle).Height
+			default:
+				segHeight = t.cachedSegmentVisual(seg, 0).MinSize().Height
+			}
+			height = fyne.Max(height, segHeight)
+		}
+		if height == 0 {
+			height = fyne.MeasureText("M", textSize, fyne.TextStyle{}).Height
+		}
+
+		bound.yPos = yPos
+		bound.height = height
+		yPos += height
+
+		lastSeg := bound.segments[len(bound.segments)-1]
+		if !lastSeg.Inline() && i < len(t.rowBounds)-1 && t.rowBounds[i+1].segments[0] != lastSeg {
+			yPos += lineSpacing
+		}
+	}
+}
+
+// uniformRowGeometry handles the common case of content that is one run of text,
+// returning true if the geometry was calculated.
+func (t *RichText) uniformRowGeometry() bool {
+	if len(t.Segments) != 1 {
+		return false
+	}
+	text, ok := t.Segments[0].(*TextSegment)
+	if !ok {
+		return false
+	}
+
+	height := fyne.MeasureText("M", text.size(), text.Style.TextStyle).Height
+	yPos := float32(0)
+	for i := range t.rowBounds {
+		t.rowBounds[i].yPos = yPos
+		t.rowBounds[i].height = height
+		yPos += height
+	}
+	return true
+}
+
+// rowFirstVisibleSegment returns the first segment that puts content on this row.
+func rowFirstVisibleSegment(bound *rowBoundary) RichTextSegment {
+	for i, seg := range bound.segments {
+		if i == 0 && len(bound.segments) > 1 && bound.segBegin >= utf8.RuneCountInString(seg.Textual()) {
+			continue
+		}
+		return seg
+	}
+	return nil
+}
+
+// boundQuoting returns the quoting depth that a row is rendered at.
+func boundQuoting(bound *rowBoundary) int {
+	visible := rowFirstVisibleSegment(bound)
+	if visible == nil {
+		return 0
+	}
+
+	switch first := visible.(type) {
+	case *TextSegment:
+		return first.Style.QuotingDepth
+	case *HyperlinkSegment:
+		return first.quotingLevel
+	case *CodeBlockSegment:
+		return first.quotingLevel
+	}
+	return 0
+}
+
+// rowAt returns the index of the row rendered at the specified vertical offset.
+func (t *RichText) rowAt(y float32) int {
+	rows := t.rows()
+	t.ensureRowGeometry()
+	for i := 0; i < rows; i++ {
+		rowY, height := t.rowGeometry(i)
+		if y < rowY+height {
+			return i
+		}
+	}
+	return rows
+}
+
+// rowGeometry returns the vertical offset and height of the specified row.
+func (t *RichText) rowGeometry(row int) (y, height float32) {
+	if row < 0 || row >= t.rows() {
+		th := t.Theme()
+		return 0, fyne.MeasureText("M", th.Size(theme.SizeNameText), fyne.TextStyle{}).Height
+	}
+	t.ensureRowGeometry()
+
+	bound := &t.rowBounds[row]
+	if bound.height == 0 {
+		th := t.Theme()
+		return bound.yPos, fyne.MeasureText("M", th.Size(theme.SizeNameText), fyne.TextStyle{}).Height
+	}
+	return bound.yPos, bound.height
+}
+
+// rowSegmentRunes returns the runes of the segment at index i within the given
+// row that are visible on that row.
+func rowSegmentRunes(bound *rowBoundary, i int) []rune {
+	runes := []rune(bound.segments[i].Textual())
+	last := len(bound.segments) - 1
+
+	if i == 0 {
+		begin := min(bound.segBegin, len(runes))
+		if last == 0 {
+			return runes[begin:max(min(bound.segEnd, len(runes)), begin)]
+		}
+		return runes[begin:]
+	}
+	if i == last {
+		return runes[:min(bound.segEnd, len(runes))]
+	}
+	return runes
 }
 
 // RichTextBlock is an extension of a text segment that contains other segments
@@ -615,6 +785,7 @@ func (r *textRenderer) Layout(size fyne.Size) {
 	for row, bound := range bounds {
 		leftPad, align := rowPaddingAndAlign(bound, lineSpacing, rowAlign)
 		rowAlign = align
+		rowY := yPos
 
 		for segI := range bound.segments {
 			if i == len(objs) {
@@ -648,11 +819,16 @@ func (r *textRenderer) Layout(size fyne.Size) {
 			rowItems = nil
 		}
 
+		// record where this row landed so a cursor or selection can be placed quickly.
+		bounds[row].yPos = rowY - (innerPadding - r.obj.inset.Height)
+		bounds[row].height = yPos - rowY
+
 		lastSeg := bound.segments[len(bound.segments)-1]
 		if !lastSeg.Inline() && row < len(bounds)-1 && bounds[row+1].segments[0] != lastSeg { // ignore wrapped lines etc
 			yPos += lineSpacing
 		}
 	}
+	r.obj.geometryValid = true
 }
 
 // MinSize calculates the minimum size of a rich text widget.
@@ -1275,18 +1451,18 @@ func setAlign(obj fyne.CanvasObject, align fyne.TextAlign) {
 func rowPaddingAndAlign(bound rowBoundary, lineSpacing float32, currentAlign fyne.TextAlign) (float32, fyne.TextAlign) {
 	leftPad := bound.indent
 	align := currentAlign
-	if len(bound.segments) > 0 {
-		if text, ok := bound.segments[0].(*TextSegment); ok {
+	if first := rowFirstVisibleSegment(&bound); first != nil {
+		if text, ok := first.(*TextSegment); ok {
 			align = text.Style.Alignment
 			if text.Style.QuotingDepth > 0 {
 				leftPad = lineSpacing * 4 * float32(text.Style.QuotingDepth)
 			}
-		} else if link, ok := bound.segments[0].(*HyperlinkSegment); ok {
+		} else if link, ok := first.(*HyperlinkSegment); ok {
 			align = link.Alignment
 			if link.quotingLevel > 0 {
 				leftPad = lineSpacing * 4 * float32(link.quotingLevel)
 			}
-		} else if block, ok := bound.segments[0].(*CodeBlockSegment); ok {
+		} else if block, ok := first.(*CodeBlockSegment); ok {
 			align = fyne.TextAlignLeading
 			if block.quotingLevel > 0 {
 				leftPad = lineSpacing * 4 * float32(block.quotingLevel)
@@ -1373,4 +1549,8 @@ type rowBoundary struct {
 
 	ellipsis bool
 	indent   float32
+
+	// yPos and height record where this row was placed by the renderer, so that
+	// widgets can position a cursor or selection against rows of differing size.
+	yPos, height float32
 }
