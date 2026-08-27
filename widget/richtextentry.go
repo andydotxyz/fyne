@@ -104,8 +104,8 @@ func (e *RichTextEntry) ParseMarkdown(content string) {
 func (e *RichTextEntry) AppendMarkdown(content string) {
 	provider := e.richProvider()
 	segments := provider.Segments
-	if current := provider.String(); current != "" && !strings.HasSuffix(current, "\n") {
-		segments = append(segments, &TextSegment{Style: RichTextStyleInline, Text: "\n"})
+	if current := provider.String(); current != "" && !strings.HasSuffix(current, newLineChar) {
+		segments = append(segments, &TextSegment{Style: RichTextStyleInline, Text: newLineChar})
 	}
 	segments = append(segments, editableSegments(parseMarkdown(content))...)
 
@@ -437,7 +437,7 @@ func trimTrailingNewline(segments []RichTextSegment) []RichTextSegment {
 			continue
 		}
 
-		text.Text = strings.TrimSuffix(text.Text, "\n")
+		text.Text = strings.TrimSuffix(text.Text, newLineChar)
 		return segments
 	}
 	return segments
@@ -451,7 +451,7 @@ func endsWithNewline(segments []RichTextSegment) bool {
 		if content == "" {
 			continue
 		}
-		return strings.HasSuffix(content, "\n")
+		return strings.HasSuffix(content, newLineChar)
 	}
 	return false
 }
@@ -465,7 +465,7 @@ func flattenSegments(in []RichTextSegment, out []RichTextSegment) []RichTextSegm
 		if len(out) == 0 || endsWithNewline(out) {
 			return // nothing to break away from, or a break is already there
 		}
-		appendText(RichTextStyleInline, "\n")
+		appendText(RichTextStyleInline, newLineChar)
 	}
 
 	for _, seg := range in {

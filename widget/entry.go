@@ -22,6 +22,7 @@ import (
 const (
 	bindIgnoreDelay = time.Millisecond * 100 // ignore incoming DataItem fire after we have called Set
 	multiLineRows   = 3
+	newLineChar     = "\n"
 )
 
 // Declare conformity with interfaces
@@ -1017,7 +1018,7 @@ func (e *Entry) pasteFromClipboard(clipboard fyne.Clipboard) {
 
 	if !e.MultiLine {
 		// format clipboard content to be compatible with single line entry
-		text = strings.ReplaceAll(text, "\n", " ")
+		text = strings.ReplaceAll(text, newLineChar, " ")
 	}
 
 	if e.sel.selecting {
@@ -1518,7 +1519,7 @@ func (e *Entry) typedKeyReturn(provider *RichText, multiLine bool) {
 		onSubmitted(text)
 		return
 	}
-	s := []rune("\n")
+	s := []rune(newLineChar)
 	pos := e.CursorTextOffset()
 	provider.insertAt(pos, s)
 	e.undoStack.MergeOrAdd(&entryModifyAction{

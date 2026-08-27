@@ -21,7 +21,10 @@ import (
 	"fyne.io/fyne/v2/theme"
 )
 
-const passwordChar = "•"
+const (
+	averageChar  = "M"
+	passwordChar = "•"
+)
 
 var _ fyne.Widget = (*RichText)(nil)
 
@@ -166,7 +169,7 @@ func (t *RichText) contentIs(text string) bool {
 
 // charMinSize returns the average char size to use for internal computation
 func (*RichText) charMinSize(concealed bool, style fyne.TextStyle, textSize float32) fyne.Size {
-	defaultChar := "M"
+	defaultChar := averageChar
 	if concealed {
 		defaultChar = passwordChar
 	}
@@ -623,7 +626,7 @@ func (t *RichText) updateRowGeometry() {
 			height = fyne.Max(height, segHeight)
 		}
 		if height == 0 {
-			height = fyne.MeasureText("M", textSize, fyne.TextStyle{}).Height
+			height = fyne.MeasureText(averageChar, textSize, fyne.TextStyle{}).Height
 		}
 
 		bound.yPos = yPos
@@ -648,7 +651,7 @@ func (t *RichText) uniformRowGeometry() bool {
 		return false
 	}
 
-	height := fyne.MeasureText("M", text.size(), text.Style.TextStyle).Height
+	height := fyne.MeasureText(averageChar, text.size(), text.Style.TextStyle).Height
 	yPos := float32(0)
 	for i := range t.rowBounds {
 		t.rowBounds[i].yPos = yPos
@@ -702,14 +705,14 @@ func (t *RichText) rowAt(y float32) int {
 func (t *RichText) rowGeometry(row int) (y, height float32) {
 	if row < 0 || row >= t.rows() {
 		th := t.Theme()
-		return 0, fyne.MeasureText("M", th.Size(theme.SizeNameText), fyne.TextStyle{}).Height
+		return 0, fyne.MeasureText(averageChar, th.Size(theme.SizeNameText), fyne.TextStyle{}).Height
 	}
 	t.ensureRowGeometry()
 
 	bound := &t.rowBounds[row]
 	if bound.height == 0 {
 		th := t.Theme()
-		return bound.yPos, fyne.MeasureText("M", th.Size(theme.SizeNameText), fyne.TextStyle{}).Height
+		return bound.yPos, fyne.MeasureText(averageChar, th.Size(theme.SizeNameText), fyne.TextStyle{}).Height
 	}
 	return bound.yPos, bound.height
 }
