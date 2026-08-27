@@ -851,8 +851,8 @@ func (e *Entry) deleteWord(right bool) {
 	// convert start, end to absolute text position
 	b := provider.rowBoundary(cursorRow)
 	if b != nil {
-		start += b.begin
-		end += b.begin
+		start += b.docBegin
+		end += b.docBegin
 	}
 
 	erased := provider.deleteFromTo(start, end)
@@ -1179,16 +1179,16 @@ func (e *Entry) rowColFromTextPos(pos int) (row int, col int) {
 		if b == nil {
 			continue
 		}
-		if b.begin > pos {
+		if b.docBegin > pos {
 			break
 		}
 
-		if b.end < pos {
+		if b.docEnd < pos {
 			row++
 		}
-		col = pos - b.begin
+		col = pos - b.docBegin
 		// if this gap is at `pos` and is a line wrap, increment (safe to access boundary i-1)
-		if canWrap && b.begin == pos && pos != 0 && provider.rowBoundary(i-1).end == b.begin && row < (totalRows-1) {
+		if canWrap && b.docBegin == pos && pos != 0 && provider.rowBoundary(i-1).docEnd == b.docBegin && row < (totalRows-1) {
 			row++
 		}
 	}

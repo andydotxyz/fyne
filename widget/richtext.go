@@ -159,7 +159,8 @@ func (*RichText) charMinSize(concealed bool, style fyne.TextStyle, textSize floa
 	return fyne.MeasureText(defaultChar, textSize, style)
 }
 
-// deleteFromTo removes the text between the specified positions
+// deleteFromTo removes the text between the specified positions.
+// Positions are rune offsets into the whole content, spanning all segments.
 func (t *RichText) deleteFromTo(lowBound int, highBound int) []rune {
 	if lowBound >= highBound {
 		return []rune{}
@@ -167,39 +168,29 @@ func (t *RichText) deleteFromTo(lowBound int, highBound int) []rune {
 
 	start := 0
 	ret := make([]rune, 0, highBound-lowBound)
-	deleting := false
-	var segs []RichTextSegment
-	for i, seg := range t.Segments {
-		if _, ok := seg.(*TextSegment); !ok {
-			if !deleting {
-				segs = append(segs, seg)
-			}
-			continue
-		}
-		r := ([]rune)(seg.(*TextSegment).Text)
-		end := start + len(r)
-		if end < lowBound {
+	segs := make([]RichTextSegment, 0, len(t.Segments))
+	for _, seg := range t.Segments {
+		end := start + utf8.RuneCountInString(seg.Textual())
+
+		if end <= lowBound || start >= highBound { // wholly outside the deleted range
 			segs = append(segs, seg)
 			start = end
 			continue
 		}
 
-		startOff := int(math.Max(float64(lowBound-start), 0))
-		endOff := int(math.Min(float64(end), float64(highBound))) - start
-		ret = append(ret, r[startOff:endOff]...)
-		r2 := append(r[:startOff], r[endOff:]...)
-		seg.(*TextSegment).Text = string(r2)
-		segs = append(segs, seg)
-
-		// prepare next iteration
-		start = end
-		if start >= highBound {
-			segs = append(segs, t.Segments[i+1:]...)
-			break
-		} else if start >= lowBound {
-			deleting = true
+		if text, ok := seg.(*TextSegment); ok {
+			r := []rune(text.Text)
+			from := max(lowBound-start, 0)
+			to := min(highBound-start, len(r))
+			ret = append(ret, r[from:to]...)
+			text.Text = string(r[:from]) + string(r[to:])
+			segs = append(segs, seg)
+		} else { // an object cannot be split, so it goes entirely
+			ret = append(ret, []rune(seg.Textual())...)
 		}
+		start = end
 	}
+
 	t.Segments = segs
 	t.Refresh()
 	return ret
@@ -253,38 +244,62 @@ func (t *RichText) cleanVisualCache() {
 	}
 }
 
-// insertAt inserts the text at the specified position
+// insertAt inserts the text at the specified position.
+// The position is a rune offset into the whole content, spanning all segments.
 func (t *RichText) insertAt(pos int, runes []rune) {
-	index := 0
-	start := 0
-	var into *TextSegment
-	for i, seg := range t.Segments {
-		if _, ok := seg.(*TextSegment); !ok {
-			continue
-		}
-		end := start + len([]rune(seg.(*TextSegment).Text))
-		into = seg.(*TextSegment)
-		index = i
-		if end > pos {
+	// Find best segment if multiple match.
+	var contains, empty, before, after *TextSegment
+	offset, start := 0, 0
+	for _, seg := range t.Segments {
+		if start > pos {
 			break
 		}
+		end := start + utf8.RuneCountInString(seg.Textual())
 
+		if text, ok := seg.(*TextSegment); ok {
+			switch {
+			case start < pos && pos < end:
+				if contains == nil {
+					contains, offset = text, pos-start
+				}
+			case start == pos && end == pos:
+				if empty == nil {
+					empty = text
+				}
+			case end == pos:
+				before = text
+			case start == pos:
+				if after == nil {
+					after = text
+				}
+			}
+		}
 		start = end
 	}
 
-	if into == nil {
+	into := contains
+	switch {
+	case into != nil:
+	case empty != nil:
+		into, offset = empty, 0
+	case before != nil:
+		into, offset = before, utf8.RuneCountInString(before.Text)
+	case after != nil:
+		into, offset = after, 0
+	}
+
+	if into == nil { // no text segment covers this position, so start a new one
+		t.Segments = append(t.Segments, &TextSegment{Style: RichTextStyleInline, Text: string(runes), parent: t})
 		return
 	}
-	r := ([]rune)(into.Text)
-	if pos > len(r) { // safety in case position is out of bounds for the segment
-		pos = len(r)
-	}
-	r2 := make([]rune, len(r)+len(runes))
-	copy(r2, r[:pos])
-	copy(r2[pos:], runes)
-	copy(r2[pos+len(runes):], r[pos:])
+
+	r := []rune(into.Text)
+	offset = min(offset, len(r))
+	r2 := make([]rune, 0, len(r)+len(runes))
+	r2 = append(r2, r[:offset]...)
+	r2 = append(r2, runes...)
+	r2 = append(r2, r[offset:]...)
 	into.Text = string(r2)
-	t.Segments[index] = into
 }
 
 // Len returns the text widget buffer length
@@ -408,9 +423,12 @@ func (t *RichText) updateRowBounds() {
 	var currentBound *rowBoundary
 	currentBoundDepth := 0
 	rowContinuationIndent := float32(-1)
+	docOffset := 0 // rune offset of the current segment within the whole text
 	var iterateSegments func(segList []RichTextSegment, depth int)
 	iterateSegments = func(segList []RichTextSegment, depth int) {
 		for _, seg := range segList {
+			segLen := utf8.RuneCountInString(seg.Textual())
+
 			if parent, ok := seg.(RichTextBlock); ok {
 				segs := parent.Segments()
 				iterateSegments(segs, depth+1)
@@ -420,18 +438,20 @@ func (t *RichText) updateRowBounds() {
 					currentBoundDepth = depth
 					rowContinuationIndent = -1
 				}
+				docOffset += segLen
 				continue
 			}
 			_, isText := seg.(*TextSegment)
 			_, isHyperlink := seg.(*HyperlinkSegment)
 			if !isText && !isHyperlink {
 				if currentBound == nil {
-					bound := rowBoundary{segments: []RichTextSegment{seg}}
+					bound := rowBoundary{segments: []RichTextSegment{seg}, docBegin: docOffset, docEnd: docOffset + segLen}
 					bounds = append(bounds, bound)
 					currentBound = &bound
 					currentBoundDepth = depth
 				} else {
 					bounds[len(bounds)-1].segments = append(bounds[len(bounds)-1].segments, seg)
+					bounds[len(bounds)-1].docEnd = docOffset + segLen
 				}
 
 				itemMin := t.cachedSegmentVisual(seg, 0).MinSize()
@@ -444,6 +464,7 @@ func (t *RichText) updateRowBounds() {
 					rowContinuationIndent = -1
 					fitSize.Height -= itemMin.Height + th.Size(theme.SizeNameLineSpacing)
 				}
+				docOffset += segLen
 				continue
 			}
 			var textStyle fyne.TextStyle
@@ -465,10 +486,17 @@ func (t *RichText) updateRowBounds() {
 			retBounds, height := lineBounds(t, seg, wrapWidth-leftPad, fyne.NewSize(maxWidth, fitSize.Height), func(text []rune) fyne.Size {
 				return fyne.MeasureText(string(text), textSize, textStyle)
 			})
+			for i := range retBounds {
+				retBounds[i].docBegin = docOffset + retBounds[i].segBegin
+				retBounds[i].docEnd = docOffset + retBounds[i].segEnd
+			}
 			boundWasNil := currentBound == nil
 			if currentBound != nil {
 				if len(retBounds) > 0 {
-					bounds[len(bounds)-1].end = retBounds[0].end // invalidate row ending as we have more content
+					// this row now runs on into another segment, so segEnd moves to
+					// index the new last segment rather than the previous one
+					bounds[len(bounds)-1].segEnd = retBounds[0].segEnd
+					bounds[len(bounds)-1].docEnd = docOffset + retBounds[0].segEnd
 					bounds[len(bounds)-1].segments = append(bounds[len(bounds)-1].segments, seg)
 					if depth > currentBoundDepth {
 						if rowContinuationIndent == -1 {
@@ -478,7 +506,7 @@ func (t *RichText) updateRowBounds() {
 							runes := []rune(seg.Textual())
 							for i := range retBounds[1:] {
 								b := &retBounds[1+i]
-								if b.begin > 0 && b.begin <= len(runes) && runes[b.begin-1] == '\n' {
+								if b.segBegin > 0 && b.segBegin <= len(runes) && runes[b.segBegin-1] == '\n' {
 									continue
 								}
 								b.indent = rowContinuationIndent
@@ -503,14 +531,14 @@ func (t *RichText) updateRowBounds() {
 				last := bounds[len(bounds)-1]
 				begin := 0
 				if len(last.segments) == 1 {
-					begin = last.begin
+					begin = last.segBegin
 				}
 				runes := []rune(seg.Textual())
 				// check ranges - as we resize it can be wrong?
 				if begin > len(runes) {
 					begin = len(runes)
 				}
-				end := last.end
+				end := last.segEnd
 				if end > len(runes) {
 					end = len(runes)
 				}
@@ -528,6 +556,7 @@ func (t *RichText) updateRowBounds() {
 				rowContinuationIndent = -1
 				wrapWidth = maxWidth
 			}
+			docOffset += segLen
 		}
 	}
 
@@ -762,12 +791,12 @@ func (r *textRenderer) Refresh() {
 
 			if i == 0 {
 				if len(bound.segments) == 1 {
-					txt = string(runes[bound.begin:bound.end])
+					txt = string(runes[bound.segBegin:bound.segEnd])
 				} else {
-					txt = string(runes[bound.begin:])
+					txt = string(runes[bound.segBegin:])
 				}
 			} else if i == len(bound.segments)-1 && len(bound.segments) > 1 {
-				txt = string(runes[:bound.end])
+				txt = string(runes[:bound.segEnd])
 			} else {
 				txt = string(runes)
 			}
@@ -996,8 +1025,8 @@ func ellipsisPriorBound(bounds []rowBoundary, trunc fyne.TextTruncation, width f
 	seg := prior.segments[0].(*TextSegment)
 	ellipsisSize := fyne.MeasureText("…", seg.size(), seg.Style.TextStyle) //revive:disable-line:add-constant
 
-	fitCount := howManyRunesFit([]rune(seg.Text)[prior.begin:prior.end], width-ellipsisSize.Width, charWidth, measurer)
-	prior.end = prior.begin + fitCount
+	fitCount := howManyRunesFit([]rune(seg.Text)[prior.segBegin:prior.segEnd], width-ellipsisSize.Width, charWidth, measurer)
+	prior.segEnd = prior.segBegin + fitCount
 
 	prior.ellipsis = true
 	bounds[len(bounds)-1] = prior
@@ -1060,8 +1089,8 @@ func wrapBreakLines(seg RichTextSegment, trunc fyne.TextTruncation, measureWidth
 	yPos := float32(0)
 	var bounds []rowBoundary
 	for _, l := range lines {
-		low := l.begin
-		high := l.end
+		low := l.segBegin
+		high := l.segEnd
 		if low == high {
 			l.firstSegmentReuse = reuse
 			reuse++
@@ -1076,14 +1105,14 @@ func wrapBreakLines(seg RichTextSegment, trunc fyne.TextTruncation, measureWidth
 			fitCount := howManyRunesFit(text[low:high], measureWidth, charWidth, measurer)
 			switch fitCount {
 			case high - low: // all characters fit on this line
-				bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, high, false, 0})
+				bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: high, ellipsis: false})
 				reuse++
 				low = high
-				high = l.end
+				high = l.segEnd
 				measureWidth = maxSize.Width
 				yPos += lineHeight
 			case 0: // even a character won't fit
-				bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, low + 1, false, 0})
+				bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: low + 1, ellipsis: false})
 				reuse++
 				low++
 				yPos += lineHeight
@@ -1104,8 +1133,8 @@ func wrapWordLines(seg RichTextSegment, trunc fyne.TextTruncation, measureWidth 
 	yPos := float32(0)
 	var bounds []rowBoundary
 	for _, l := range lines {
-		low := l.begin
-		high := l.end
+		low := l.segBegin
+		high := l.segEnd
 		if low == high {
 			l.firstSegmentReuse = reuse
 			reuse++
@@ -1120,10 +1149,10 @@ func wrapWordLines(seg RichTextSegment, trunc fyne.TextTruncation, measureWidth 
 			sub := text[low:high]
 			fitCount := howManyRunesFit(sub, measureWidth, charWidth, measurer)
 			if fitCount == high-low { // all characters fit on this line
-				bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, high, false, 0})
+				bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: high, ellipsis: false})
 				reuse++
 				low = high
-				high = l.end
+				high = l.segEnd
 				if low < high && unicode.IsSpace(text[low]) {
 					low++
 				}
@@ -1134,7 +1163,7 @@ func wrapWordLines(seg RichTextSegment, trunc fyne.TextTruncation, measureWidth 
 			}
 			if fitCount == 0 { // even a character won't fit
 				if measureWidth < maxSize.Width {
-					bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, low, false, 0})
+					bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: low, ellipsis: false})
 					reuse++
 					measureWidth = maxSize.Width
 					yPos += lineHeight
@@ -1146,13 +1175,13 @@ func wrapWordLines(seg RichTextSegment, trunc fyne.TextTruncation, measureWidth 
 					include = 0
 					ellipsis = true
 				}
-				bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, low + include, ellipsis, 0})
+				bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: low + include, ellipsis: ellipsis})
 				low++
 				high = low + 1
 				reuse++
 
 				yPos += lineHeight
-				if high > l.end {
+				if high > l.segEnd {
 					return bounds, yPos
 				}
 				continue
@@ -1168,7 +1197,7 @@ func wrapWordLines(seg RichTextSegment, trunc fyne.TextTruncation, measureWidth 
 			oldHigh := high
 			high = low + fitCount
 			if low == 0 && measureWidth < maxSize.Width { // add a newline as there is more space on next
-				bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, low, false, 0})
+				bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: low, ellipsis: false})
 				reuse++
 				high = oldHigh
 				measureWidth = maxSize.Width
@@ -1188,8 +1217,8 @@ func truncateLines(t *RichText, seg RichTextSegment, trunc fyne.TextTruncation, 
 	charWidth := charSize.Width
 	reuse := 0
 	for _, l := range lines {
-		low := l.begin
-		high := l.end
+		low := l.segBegin
+		high := l.segEnd
 		if low == high {
 			l.firstSegmentReuse = reuse
 			reuse++
@@ -1214,12 +1243,12 @@ func truncateLines(t *RichText, seg RichTextSegment, trunc fyne.TextTruncation, 
 			}
 			end, full := truncateLimit(string(txt), textObj, int(measureWidth), []rune{'…'})
 			high = low + end
-			bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, high, !full, 0})
+			bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: high, ellipsis: !full})
 			reuse++
 		case fyne.TextTruncateClip:
 			fitCount := howManyRunesFit(text[low:high], measureWidth, charWidth, measurer)
 			high = low + fitCount
-			bounds = append(bounds, rowBoundary{[]RichTextSegment{seg}, reuse, low, high, false, 0})
+			bounds = append(bounds, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: reuse, segBegin: low, segEnd: high, ellipsis: false})
 			reuse++
 		case fyne.TextTruncateOff:
 			// don’t do anything
@@ -1277,11 +1306,11 @@ func splitLines(seg RichTextSegment) []rowBoundary {
 	for i := 0; i < length; i++ {
 		if text[i] == '\n' {
 			high = i
-			lines = append(lines, rowBoundary{[]RichTextSegment{seg}, len(lines), low, high, false, 0})
+			lines = append(lines, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: len(lines), segBegin: low, segEnd: high, ellipsis: false})
 			low = i + 1
 		}
 	}
-	return append(lines, rowBoundary{[]RichTextSegment{seg}, len(lines), low, length, false, 0})
+	return append(lines, rowBoundary{segments: []RichTextSegment{seg}, firstSegmentReuse: len(lines), segBegin: low, segEnd: length, ellipsis: false})
 }
 
 func truncateLimit(s string, text *canvas.Text, limit int, ellipsis []rune) (int, bool) {
@@ -1332,7 +1361,16 @@ func truncateLimit(s string, text *canvas.Text, limit int, ellipsis []rune) (int
 type rowBoundary struct {
 	segments          []RichTextSegment
 	firstSegmentReuse int
-	begin, end        int
-	ellipsis          bool
-	indent            float32
+
+	// segBegin indexes into the first segment of this row and segEnd into the
+	// last, as a row may start or finish part way through a segment that it
+	// shares with its neighbours.
+	segBegin, segEnd int
+
+	// docBegin and docEnd are the rune offsets of this row within the whole
+	// text, which is what a cursor or selection position is measured in.
+	docBegin, docEnd int
+
+	ellipsis bool
+	indent   float32
 }

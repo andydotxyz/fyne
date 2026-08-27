@@ -258,7 +258,7 @@ func textPosFromRowCol(row, col int, prov *RichText) int {
 	if b == nil {
 		return col
 	}
-	return b.begin + col
+	return b.docBegin + col
 }
 
 func (s *selectable) updateMousePointer(p fyne.Position) {
