@@ -180,7 +180,6 @@ func (s *selectable) TypedShortcut(sh fyne.Shortcut) {
 
 func (s *selectable) cursorColAt(row int, pos fyne.Position) int {
 	th := s.theme
-	textSize := th.Size(s.getSizeName())
 	innerPad := th.Size(theme.SizeNameInnerPadding)
 	provider := s.provider
 
@@ -203,6 +202,7 @@ func (s *selectable) cursorColAt(row int, pos fyne.Position) int {
 		}
 	}
 
+	textSize := th.Size(s.getSizeName())
 	return sort.Search(provider.rowLength(row), func(i int) bool {
 		mid := (provider.lineSizeToColumn(i, row, textSize, innerPad).Width +
 			provider.lineSizeToColumn(i+1, row, textSize, innerPad).Width) / 2

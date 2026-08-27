@@ -3,6 +3,7 @@ package widget
 import (
 	"image/color"
 	"math"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -690,13 +691,11 @@ func boundQuoting(bound *rowBoundary) int {
 func (t *RichText) rowAt(y float32) int {
 	rows := t.rows()
 	t.ensureRowGeometry()
-	for i := 0; i < rows; i++ {
-		rowY, height := t.rowGeometry(i)
-		if y < rowY+height {
-			return i
-		}
-	}
-	return rows
+
+	return sort.Search(rows, func(i int) bool {
+		bound := &t.rowBounds[i]
+		return y < bound.yPos+bound.height
+	})
 }
 
 // rowGeometry returns the vertical offset and height of the specified row.
