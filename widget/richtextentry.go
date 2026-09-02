@@ -1329,7 +1329,10 @@ func (e *RichTextEntry) toggleCodeFence() bool {
 		if from > blockStart {
 			from--
 		}
-		block := (*owner)[index].(*CodeBlockSegment)
+		block, ok := (*owner)[index].(*CodeBlockSegment)
+		if !ok {
+			return false
+		}
 		provider.deleteFromTo(from, pos)
 
 		end := blockStart + utf8.RuneCountInString(block.Text)
@@ -1560,7 +1563,10 @@ func (e *RichTextEntry) joinIntoBlockAbove(pos int) bool {
 		return false
 	}
 
-	block := (*owner)[index].(*CodeBlockSegment)
+	block, ok := (*owner)[index].(*CodeBlockSegment)
+	if !ok {
+		return false
+	}
 	if bound := provider.rowBoundary(e.CursorRow); bound == nil || bound.panel == block {
 		return false // the cursor is inside the block, not on the line below it
 	}

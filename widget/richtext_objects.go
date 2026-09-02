@@ -374,7 +374,10 @@ func (l *listMarkerSegment) Visual() fyne.CanvasObject {
 
 // Update applies the current state of this marker to an existing visual.
 func (l *listMarkerSegment) Update(o fyne.CanvasObject) {
-	text := o.(*canvas.Text)
+	text, ok := o.(*canvas.Text)
+	if !ok {
+		return
+	}
 	text.Text = l.marker()
 	col := l.colorName
 	if col == "" {
