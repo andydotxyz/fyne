@@ -52,6 +52,11 @@ type RichText struct {
 	minCache       fyne.Size
 	geometryValid  bool // whether rowBounds carries up to date row positions
 	decor          []rowDecoration
+
+	// highlight is the selection whose rectangles are drawn over this content,
+	// above the panels that blocks sit on but below the text
+	highlight  *selectable
+	highlights []fyne.CanvasObject
 }
 
 // rowDecoration is a graphical element drawn behind a run of rows, such as the
@@ -951,6 +956,23 @@ type RichTextBlock interface {
 	Segments() []RichTextSegment
 }
 
+// setHighlights records the rectangles that a selection wants drawn over this
+// content.
+func (t *RichText) setHighlights(sel *selectable, objs []fyne.CanvasObject) {
+	t.highlight, t.highlights = sel, objs
+
+	canvas.Refresh(t.super())
+}
+
+// highlightObjects returns the selection rectangles to draw over this content.
+func (t *RichText) highlightObjects() []fyne.CanvasObject {
+	if t.highlight == nil || !t.highlight.selecting {
+		return nil
+	}
+
+	return t.highlights
+}
+
 // updateDecorations prepares the graphical elements drawn behind rows. It returns the
 // objects to draw, which are added before the text so that they appear behind it.
 func (t *RichText) updateDecorations() []fyne.CanvasObject {
@@ -1005,7 +1027,7 @@ func codeInlineText(obj fyne.CanvasObject) (*canvas.Text, bool) {
 // textObjects returns the visuals of the rendered segments, leaving out the
 // decorations that are drawn behind them.
 func (r *textRenderer) textObjects() []fyne.CanvasObject {
-	objs := r.Objects()
+	objs := r.BaseRenderer.Objects()
 	if r.obj.scr != nil {
 		objs = r.obj.scr.Content.(*fyne.Container).Objects[1].(*fyne.Container).Objects
 	}
@@ -1014,6 +1036,26 @@ func (r *textRenderer) textObjects() []fyne.CanvasObject {
 		return nil
 	}
 	return objs[len(r.obj.decor):]
+}
+
+// Objects returns the visuals of this rich text, with any selection highlights
+// slotted in above the panels that blocks sit on and below the text itself.
+func (r *textRenderer) Objects() []fyne.CanvasObject {
+	objs := r.BaseRenderer.Objects()
+	if len(r.obj.decor) == 0 {
+		return objs
+	}
+
+	highlights := r.obj.highlightObjects()
+	if len(highlights) == 0 {
+		return objs
+	}
+
+	at := min(len(r.obj.decor), len(objs))
+	out := make([]fyne.CanvasObject, 0, len(objs)+len(highlights))
+	out = append(out, objs[:at]...)
+	out = append(out, highlights...)
+	return append(out, objs[at:]...)
 }
 
 func (r *textRenderer) Layout(size fyne.Size) {

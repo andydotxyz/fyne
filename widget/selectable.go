@@ -310,12 +310,20 @@ func (*selectableRenderer) MinSize() fyne.Size {
 }
 
 func (r *selectableRenderer) Objects() []fyne.CanvasObject {
+	if r.sel.provider != nil && len(r.sel.provider.decor) > 0 {
+		return nil // the text draws them, above the panels that its blocks sit on
+	}
+
 	return r.selections
 }
 
 func (r *selectableRenderer) Refresh() {
 	r.buildSelection()
 	selections := r.selections
+	if r.sel.provider != nil {
+		// hand them over so the text can draw them above any panels that it has
+		r.sel.provider.setHighlights(r.sel, selections)
+	}
 	v := fyne.CurrentApp().Settings().ThemeVariant()
 
 	selectionColor := r.sel.theme.Color(theme.ColorNameSelection, v)

@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/internal/cache"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/theme"
 )
@@ -730,4 +732,106 @@ func TestRichTextEntry_BackspaceJoinsLineToCodeBlock(t *testing.T) {
 	assert.Equal(t, "codeafter", code.Text) // the line joined the code above it
 	assert.Equal(t, "codeafter", e.Text)
 	assert.Equal(t, 4, e.CursorColumn)
+}
+
+func TestRichTextEntry_SelectionDrawsOverCodePanel(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntryFromMarkdown("intro\n\n```\ncode\n```")
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(250, 200))
+	e.FocusGained()
+	e.selectAll()
+	e.sel.Refresh()
+
+	provider := e.richProvider()
+	assert.True(t, len(provider.decor) > 0, "the text draws the selection over its panel")
+	assert.Empty(t, cache.Renderer(e.sel).Objects(), "so the selection widget draws nothing")
+
+	panels, highlights, texts := -1, -1, -1
+	for i, obj := range cache.Renderer(provider).Objects() {
+		switch o := obj.(type) {
+		case *richCodeBlock:
+			panels = i
+		case *canvas.Rectangle:
+			if highlights == -1 {
+				highlights = i
+			}
+		case *canvas.Text:
+			if texts == -1 && o.Text != "" {
+				texts = i
+			}
+		}
+	}
+
+	// the panel is behind the highlight, which is in turn behind the text
+	assert.NotEqual(t, -1, panels)
+	assert.NotEqual(t, -1, highlights)
+	assert.NotEqual(t, -1, texts)
+	assert.Less(t, panels, highlights)
+	assert.Less(t, highlights, texts)
+}
+
+func TestRichTextEntry_SelectionEndsWithoutHighlights(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntryFromMarkdown("```\ncode\n```")
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(250, 200))
+	e.FocusGained()
+	e.selectAll()
+	e.sel.Refresh()
+	assert.NotEmpty(t, e.richProvider().highlightObjects())
+
+	e.ClearSelection()
+	assert.Empty(t, e.richProvider().highlightObjects(), "an ended selection leaves nothing drawn")
+}
+
+func TestRichTextEntry_MarkdownBlocks(t *testing.T) {
+	for _, source := range []string{
+		"- one\n- two",
+		"1. first\n2. second",
+		"- one\n    - inner\n- two",
+		"intro\n\n- one\n- two\n\nafter",
+		"```\ncode here\n```",
+		"intro\n\n```\ncode\nlines\n```\n\nafter",
+		"> quoted\n\n> - a\n> - b",
+		"# Title\n\n- item with **bold**\n\n```\nx := 1\n```",
+	} {
+		e := NewRichTextEntryFromMarkdown(source)
+		assert.Equal(t, source, e.Markdown(), "round trip of %q", source)
+	}
+}
+
+func TestRichTextEntry_MarkdownOfTypedBlocks(t *testing.T) {
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+
+	typeString(e, "Notes")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "- one")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "two with **bold**")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn}) // an empty item closes the list
+	typeString(e, "```")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "x := 1")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "```")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "after")
+
+	assert.Equal(t, "Notes\n\n- one\n- two with **bold**\n\n```\nx := 1\n```\n\nafter", e.Markdown())
+}
+
+func TestRichTextEntry_MarkdownOfTypedOrderedList(t *testing.T) {
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+
+	typeString(e, "3. third")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "fourth")
+
+	assert.Equal(t, "3. third\n4. fourth", e.Markdown())
 }
