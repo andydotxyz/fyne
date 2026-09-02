@@ -1278,7 +1278,8 @@ func indexOfSegment(segments []RichTextSegment, seg RichTextSegment) int {
 // codeBlockAt returns the code block that holds the given rune offset, with the
 // segments that hold the block and its index in them.
 func codeBlockAt(owner *[]RichTextSegment, pos, off int) (out *[]RichTextSegment,
-	index int, offset int, found bool) {
+	index int, offset int, found bool,
+) {
 	for i, seg := range *owner {
 		if inner := blockContainer(seg); inner != nil {
 			list, index, next, ok := codeBlockAt(inner, pos, off)
@@ -1513,7 +1514,8 @@ func isPlainStyle(style RichTextStyle) bool {
 // ownerOf returns the segments that hold the given segment, its index in them and
 // the rune offset that it starts at.
 func ownerOf(list *[]RichTextSegment, seg RichTextSegment, off int) (out *[]RichTextSegment,
-	index int, offset int, found bool) {
+	index int, offset int, found bool,
+) {
 	for i, in := range *list {
 		if in == seg {
 			return list, i, off, true

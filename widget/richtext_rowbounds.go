@@ -39,8 +39,10 @@ func newRowBoundsBuilder(t *RichText) *rowBoundsBuilder {
 	fitSize.Height -= (innerPadding + t.inset.Height) * 2
 	maxWidth := t.Size().Width - 2*innerPadding + 2*t.inset.Width
 
-	return &rowBoundsBuilder{text: t, theme: th, innerPadding: innerPadding, fitSize: fitSize,
-		maxWidth: maxWidth, wrapWidth: maxWidth, rowIndent: -1}
+	return &rowBoundsBuilder{
+		text: t, theme: th, innerPadding: innerPadding, fitSize: fitSize,
+		maxWidth: maxWidth, wrapWidth: maxWidth, rowIndent: -1,
+	}
 }
 
 // walk lays out each of the given segments in turn, recursing into any blocks.
@@ -99,8 +101,10 @@ func (b *rowBoundsBuilder) appendObject(seg RichTextSegment, depth int) {
 		row.segments = append(row.segments, seg)
 		row.docEnd = b.docOffset + segLen
 	} else {
-		b.bounds = append(b.bounds, rowBoundary{segments: []RichTextSegment{seg},
-			docBegin: b.docOffset, docEnd: b.docOffset + segLen})
+		b.bounds = append(b.bounds, rowBoundary{
+			segments: []RichTextSegment{seg},
+			docBegin: b.docOffset, docEnd: b.docOffset + segLen,
+		})
 		b.rowOpen = true
 		b.rowDepth = depth
 	}
