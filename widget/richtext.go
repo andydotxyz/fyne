@@ -883,26 +883,6 @@ func rowFirstVisibleSegment(bound *rowBoundary) RichTextSegment {
 	return nil
 }
 
-// boundQuoting returns the quoting depth that a row is rendered at.
-func boundQuoting(bound *rowBoundary) int {
-	visible := rowFirstVisibleSegment(bound)
-	if visible == nil {
-		return 0
-	}
-
-	switch first := visible.(type) {
-	case *TextSegment:
-		return first.Style.QuotingDepth
-	case *HyperlinkSegment:
-		return first.quotingLevel
-	case *CodeBlockSegment:
-		return first.quotingLevel
-	case *listMarkerSegment:
-		return first.quoting
-	}
-	return 0
-}
-
 // rowAt returns the index of the row rendered at the specified vertical offset.
 func (t *RichText) rowAt(y float32) int {
 	rows := t.rows()

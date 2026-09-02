@@ -16,8 +16,12 @@ var (
 	_ fyne.Disableable = (*RichTextEntry)(nil)
 )
 
-// codeFence marks the start and end of a fenced code block in markdown.
-const codeFence = "```"
+const (
+	markdownBold      = "**"
+	markdownCodeFence = "```"
+	markdownQuote     = "> "
+	markdownStrike    = "~~"
+)
 
 // RichTextEntry widget allows styled text to be edited when focused.
 // It behaves like an [Entry] - but the content is held as a list of [RichTextSegment],
@@ -367,7 +371,7 @@ func (e *RichTextEntry) splitAt(pos int) (*[]RichTextSegment, int) {
 // segment where the offset falls inside one. It returns the list that holds the
 // boundary with the index of the segment starting there, or a nil list and the
 // offset reached when the position is beyond these segments.
-func splitSegmentsAt(list *[]RichTextSegment, pos, off int) (*[]RichTextSegment, int, int) {
+func splitSegmentsAt(list *[]RichTextSegment, pos, off int) (out *[]RichTextSegment, index int, offset int) {
 	for i := 0; i < len(*list); i++ {
 		seg := (*list)[i]
 		if inner := blockContainer(seg); inner != nil {
@@ -725,14 +729,14 @@ func segmentsToMarkdown(segments []RichTextSegment) string {
 	}
 
 	writeCode := func(code *CodeBlockSegment) {
-		quote := strings.Repeat("> ", code.quotingLevel)
+		quote := strings.Repeat(markdownQuote, code.quotingLevel)
 		startLine(RichTextStyleInline)
 
-		out.WriteString(quote + codeFence + newLineChar)
+		out.WriteString(quote + markdownCodeFence + newLineChar)
 		for _, line := range strings.Split(strings.TrimSuffix(code.Text, newLineChar), newLineChar) {
 			out.WriteString(quote + line + newLineChar)
 		}
-		out.WriteString(quote + codeFence)
+		out.WriteString(quote + markdownCodeFence)
 		atLineStart = false
 	}
 
@@ -752,7 +756,7 @@ func segmentsToMarkdown(segments []RichTextSegment) string {
 				bullet = strconv.Itoa(number) + ". "
 				number++
 			}
-			prefix = strings.Repeat("> ", list.quotingLevel) +
+			prefix = strings.Repeat(markdownQuote, list.quotingLevel) +
 				strings.Repeat(" ", list.indentationLevel*listIndentSpaces) + bullet
 
 			startLine(RichTextStyleInline) // an item with no text still has a bullet
@@ -805,7 +809,7 @@ func segmentsToMarkdown(segments []RichTextSegment) string {
 func markdownBlockPrefix(style RichTextStyle) string {
 	prefix := ""
 	if style.QuotingDepth > 0 {
-		prefix = strings.Repeat("> ", style.QuotingDepth)
+		prefix = strings.Repeat(markdownQuote, style.QuotingDepth)
 	}
 
 	switch style.SizeName {
@@ -824,10 +828,10 @@ func markdownInlineMarks(style RichTextStyle) string {
 
 	marks := ""
 	if style.TextStyle.Strikethrough {
-		marks += "~~"
+		marks += markdownStrike
 	}
 	if style.TextStyle.Bold {
-		marks += "**"
+		marks += markdownBold
 	}
 	if style.TextStyle.Italic && style.QuotingDepth == 0 {
 		marks += "*"
@@ -843,11 +847,11 @@ func reverseMarks(marks string) string {
 	var out []string
 	for i := 0; i < len(marks); {
 		switch {
-		case strings.HasPrefix(marks[i:], "~~"):
-			out = append(out, "~~")
+		case strings.HasPrefix(marks[i:], markdownStrike):
+			out = append(out, markdownStrike)
 			i += 2
-		case strings.HasPrefix(marks[i:], "**"):
-			out = append(out, "**")
+		case strings.HasPrefix(marks[i:], markdownBold):
+			out = append(out, markdownBold)
 			i += 2
 		default:
 			out = append(out, marks[i:i+1])
@@ -866,8 +870,8 @@ var markdownInlineStyles = []struct {
 	marker string
 	apply  func(*RichTextStyle)
 }{
-	{"~~", func(s *RichTextStyle) { s.TextStyle.Strikethrough = true }},
-	{"**", func(s *RichTextStyle) { s.TextStyle.Bold = true }},
+	{markdownStrike, func(s *RichTextStyle) { s.TextStyle.Strikethrough = true }},
+	{markdownBold, func(s *RichTextStyle) { s.TextStyle.Bold = true }},
 	{"__", func(s *RichTextStyle) { s.TextStyle.Bold = true }},
 	{"`", func(s *RichTextStyle) { s.TextStyle.Monospace = true; s.codeInline = true }},
 	{"*", func(s *RichTextStyle) { s.TextStyle.Italic = true }},
@@ -1273,7 +1277,8 @@ func indexOfSegment(segments []RichTextSegment, seg RichTextSegment) int {
 
 // codeBlockAt returns the code block that holds the given rune offset, with the
 // segments that hold the block and its index in them.
-func codeBlockAt(owner *[]RichTextSegment, pos, off int) (*[]RichTextSegment, int, int, bool) {
+func codeBlockAt(owner *[]RichTextSegment, pos, off int) (out *[]RichTextSegment,
+	index int, offset int, found bool) {
 	for i, seg := range *owner {
 		if inner := blockContainer(seg); inner != nil {
 			list, index, next, ok := codeBlockAt(inner, pos, off)
@@ -1313,7 +1318,7 @@ func (e *RichTextEntry) toggleCodeFence() bool {
 			break
 		}
 	}
-	if !strings.HasPrefix(strings.TrimSpace(string(runes[lineStart:pos])), codeFence) {
+	if !strings.HasPrefix(strings.TrimSpace(string(runes[lineStart:pos])), markdownCodeFence) {
 		return false
 	}
 
@@ -1369,7 +1374,6 @@ func markdownListPrefix(prefix string) (ordered bool, number, indent int, ok boo
 
 	indent += number / listIndentSpaces
 	prefix = strings.TrimLeft(prefix, " \t")
-	number = 0
 
 	switch prefix {
 	case "-", "*", "+":
@@ -1505,7 +1509,8 @@ func isPlainStyle(style RichTextStyle) bool {
 
 // ownerOf returns the segments that hold the given segment, its index in them and
 // the rune offset that it starts at.
-func ownerOf(list *[]RichTextSegment, seg RichTextSegment, off int) (*[]RichTextSegment, int, int, bool) {
+func ownerOf(list *[]RichTextSegment, seg RichTextSegment, off int) (out *[]RichTextSegment,
+	index int, offset int, found bool) {
 	for i, in := range *list {
 		if in == seg {
 			return list, i, off, true
