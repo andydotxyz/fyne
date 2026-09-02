@@ -1079,15 +1079,15 @@ func (e *Entry) registerShortcut() {
 		e.Redo()
 	})
 	e.shortcut.AddShortcut(&fyne.ShortcutCut{}, func(se fyne.Shortcut) {
-		cut := se.(*fyne.ShortcutCut)
+		cut, _ := se.(*fyne.ShortcutCut)
 		e.cutToClipboard(cut.Clipboard)
 	})
 	e.shortcut.AddShortcut(&fyne.ShortcutCopy{}, func(se fyne.Shortcut) {
-		cpy := se.(*fyne.ShortcutCopy)
+		cpy, _ := se.(*fyne.ShortcutCopy)
 		e.copyToClipboard(cpy.Clipboard)
 	})
 	e.shortcut.AddShortcut(&fyne.ShortcutPaste{}, func(se fyne.Shortcut) {
-		paste := se.(*fyne.ShortcutPaste)
+		paste, _ := se.(*fyne.ShortcutPaste)
 		e.pasteFromClipboard(paste.Clipboard)
 	})
 	e.shortcut.AddShortcut(&fyne.ShortcutSelectAll{}, func(fyne.Shortcut) {
@@ -1307,7 +1307,7 @@ func (e *Entry) syncSegments() {
 			}
 		}
 	} else {
-		textSegment := text.Segments[0].(*TextSegment)
+		textSegment, _ := text.Segments[0].(*TextSegment)
 		textSegment.Text = e.Text
 		textSegment.Style.ColorName = colName
 		textSegment.Style.concealed = e.Password
@@ -1322,7 +1322,7 @@ func (e *Entry) syncSegments() {
 	placeholder := e.placeholderProvider()
 	placeholder.Wrapping = wrap
 
-	placeholderSegment := placeholder.Segments[0].(*TextSegment)
+	placeholderSegment, _ := placeholder.Segments[0].(*TextSegment)
 	placeholderSegment.Style.ColorName = colName
 	placeholderSegment.Style.TextStyle = e.TextStyle
 	placeholderSegment.Text = e.PlaceHolder
