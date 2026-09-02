@@ -690,22 +690,33 @@ func flattenTable(t *TableSegment, out []RichTextSegment) []RichTextSegment {
 // with the same line structure.
 func segmentsToMarkdown(segments []RichTextSegment) string {
 	out := &strings.Builder{}
-	breaks := 0 // line breaks seen since the last content was written
+	pending := 0 // line breaks to write before the next content
+	prefix := "" // written at the start of the next line, such as a list bullet
 	atLineStart := true
+
+	// startLine writes what separates this line from the last, along with the
+	// marker that introduces it.
+	startLine := func(style RichTextStyle) {
+		if pending > 0 {
+			if out.Len() > 0 {
+				out.WriteString(strings.Repeat(newLineChar, pending))
+			}
+			pending, atLineStart = 0, true
+		}
+		if !atLineStart {
+			return
+		}
+
+		out.WriteString(prefix)
+		out.WriteString(markdownBlockPrefix(style))
+		prefix, atLineStart = "", false
+	}
 
 	write := func(text string, style RichTextStyle) {
 		if text == "" {
 			return
 		}
-		if breaks > 0 {
-			// each break starts a new block, which markdown separates by a blank line
-			out.WriteString(strings.Repeat("\n\n", breaks))
-			breaks, atLineStart = 0, true
-		}
-		if atLineStart {
-			out.WriteString(markdownBlockPrefix(style))
-			atLineStart = false
-		}
+		startLine(style)
 
 		marks := markdownInlineMarks(style)
 		out.WriteString(marks)
@@ -713,31 +724,81 @@ func segmentsToMarkdown(segments []RichTextSegment) string {
 		out.WriteString(reverseMarks(marks))
 	}
 
-	for _, seg := range segments {
-		switch t := seg.(type) {
-		case *TextSegment:
-			for i, line := range strings.Split(t.Text, newLineChar) {
-				if i > 0 {
-					breaks++
-				}
-				write(line, t.Style)
+	writeCode := func(code *CodeBlockSegment) {
+		quote := strings.Repeat("> ", code.quotingLevel)
+		startLine(RichTextStyleInline)
+
+		out.WriteString(quote + codeFence + newLineChar)
+		for _, line := range strings.Split(strings.TrimSuffix(code.Text, newLineChar), newLineChar) {
+			out.WriteString(quote + line + newLineChar)
+		}
+		out.WriteString(quote + codeFence)
+		atLineStart = false
+	}
+
+	var writeSegments func(segs []RichTextSegment)
+	var writeList func(list *ListSegment)
+
+	writeList = func(list *ListSegment) {
+		number := list.StartNumber()
+		for _, item := range list.Items {
+			if sub, ok := item.(*ListSegment); ok { // a nested list follows its item
+				writeList(sub)
+				continue
 			}
-		case *HyperlinkSegment:
-			link := ""
-			if t.URL != nil {
-				link = t.URL.String()
+
+			bullet := "- "
+			if list.Ordered {
+				bullet = strconv.Itoa(number) + ". "
+				number++
 			}
-			write("["+t.Text+"]("+link+")", RichTextStyleInline)
-		case *ImageSegment:
-			source := ""
-			if t.Source != nil {
-				source = t.Source.String()
-			}
-			write("!["+t.Title+"]("+source+")", RichTextStyleInline)
-		default:
-			write(seg.Textual(), RichTextStyleInline)
+			prefix = strings.Repeat("> ", list.quotingLevel) +
+				strings.Repeat(" ", list.indentationLevel*listIndentSpaces) + bullet
+
+			startLine(RichTextStyleInline) // an item with no text still has a bullet
+			writeSegments(blockContent(item))
+			pending, atLineStart = 1, false // the next item is the next line, not a new block
 		}
 	}
+
+	writeSegments = func(segs []RichTextSegment) {
+		for _, seg := range segs {
+			switch t := seg.(type) {
+			case *TextSegment:
+				for i, line := range strings.Split(t.Text, newLineChar) {
+					if i > 0 {
+						// each break starts a new block, which markdown separates by a blank line
+						pending += 2
+					}
+					write(line, t.Style)
+				}
+			case *HyperlinkSegment:
+				link := ""
+				if t.URL != nil {
+					link = t.URL.String()
+				}
+				write("["+t.Text+"]("+link+")", RichTextStyleInline)
+			case *ImageSegment:
+				source := ""
+				if t.Source != nil {
+					source = t.Source.String()
+				}
+				write("!["+t.Title+"]("+source+")", RichTextStyleInline)
+			case *ListSegment:
+				writeList(t)
+				pending = 2
+			case *CodeBlockSegment:
+				writeCode(t)
+				pending = 2
+			case *ParagraphSegment:
+				writeSegments(t.Texts)
+			default:
+				write(seg.Textual(), RichTextStyleInline)
+			}
+		}
+	}
+
+	writeSegments(segments)
 	return out.String()
 }
 
