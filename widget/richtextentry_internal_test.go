@@ -1,6 +1,7 @@
 package widget
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,7 +63,8 @@ func TestRichTextEntry_ParseMarkdown(t *testing.T) {
 func TestRichTextEntry_ParseMarkdown_Blocks(t *testing.T) {
 	e := NewRichTextEntryFromMarkdown("- one\n- two\n\n> quoted")
 
-	assert.Equal(t, "•  one\n•  two\nquoted", e.Text)
+	// the bullets are drawn by the list, they are not part of the content
+	assert.Equal(t, "one\ntwo\nquoted", e.Text)
 }
 
 func TestRichTextEntry_SetText(t *testing.T) {
@@ -396,4 +398,336 @@ func TestRichTextEntry_DeleteWordAcrossRows(t *testing.T) {
 	e.deleteWord(false)
 
 	assert.Equal(t, "Title\nalpha beta ", e.Text)
+}
+
+// itemTexts returns the text of each item in the list segment at the given index.
+func itemTexts(t *testing.T, e *RichTextEntry, index int) []string {
+	t.Helper()
+
+	list, ok := e.Segments()[index].(*ListSegment)
+	if !ok {
+		t.Fatalf("segment %d is a %T, not a list", index, e.Segments()[index])
+	}
+
+	var out []string
+	for _, item := range list.Items {
+		text := &strings.Builder{}
+		for _, seg := range appendContentSegments([]RichTextSegment{item}, nil) {
+			text.WriteString(seg.Textual())
+		}
+		out = append(out, text.String())
+	}
+	return out
+}
+
+func TestRichTextEntry_ParseMarkdown_List(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one\n- two")
+
+	// the list is kept, so that it draws the bullets that are not content
+	assert.Equal(t, "one\ntwo", e.Text)
+	assert.Len(t, e.Segments(), 1)
+	assert.Equal(t, []string{"one\n", "two"}, itemTexts(t, e, 0))
+}
+
+func TestRichTextEntry_ListReturnAddsItem(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one\n- two")
+	e.CursorRow, e.CursorColumn = 0, 3 // the end of the first item
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "new")
+
+	assert.Equal(t, "one\nnew\ntwo", e.Text)
+	assert.Equal(t, []string{"one\n", "new\n", "two"}, itemTexts(t, e, 0))
+	assert.Equal(t, 1, e.CursorRow)
+}
+
+func TestRichTextEntry_ListReturnSplitsItem(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one two")
+	e.CursorRow, e.CursorColumn = 0, 3
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+
+	assert.Equal(t, "one\n two", e.Text)
+	assert.Equal(t, []string{"one\n", " two"}, itemTexts(t, e, 0))
+}
+
+func TestRichTextEntry_ListReturnOnEmptyItemLeaves(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one")
+	e.CursorRow, e.CursorColumn = 0, 3
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn}) // an item to type the next entry in
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn}) // nothing was typed, so the list ends
+	typeString(e, "after")
+
+	assert.Equal(t, "one\nafter", e.Text)
+	assert.Equal(t, []string{"one\n"}, itemTexts(t, e, 0))
+	assert.Equal(t, "after", e.Segments()[1].Textual()) // outside of the list
+}
+
+func TestRichTextEntry_ListBackspaceJoinsItems(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one\n- two")
+	e.CursorRow, e.CursorColumn = 1, 0 // the start of the second item
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+
+	assert.Equal(t, "onetwo", e.Text)
+	assert.Equal(t, []string{"onetwo"}, itemTexts(t, e, 0))
+}
+
+func TestRichTextEntry_ListBackspaceLeavesFirstItem(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one\n- two")
+	e.CursorRow, e.CursorColumn = 0, 0
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+
+	assert.Equal(t, "one\ntwo", e.Text)
+	assert.Equal(t, "one\n", e.Segments()[0].Textual()) // the item is out of the list now
+	assert.Equal(t, []string{"two"}, itemTexts(t, e, 1))
+}
+
+func TestRichTextEntry_ListDeleteSelectionJoinsItems(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one\n- two\n- three")
+	e.CursorRow, e.CursorColumn = 0, 2
+	e.sel.selectRow, e.sel.selectColumn, e.sel.selecting = 0, 2, true
+	e.CursorRow, e.CursorColumn = 2, 3
+	e.syncSelectable()
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDelete})
+
+	assert.Equal(t, "onee", e.Text)
+	assert.Equal(t, []string{"onee"}, itemTexts(t, e, 0))
+}
+
+func TestRichTextEntry_MarkdownMode_List(t *testing.T) {
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+
+	typeString(e, "- one")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "two")
+
+	assert.Equal(t, "one\ntwo\n", e.Text) // the bullets are drawn, not typed
+	assert.Equal(t, []string{"one\n", "two\n"}, itemTexts(t, e, 0))
+}
+
+func TestRichTextEntry_MarkdownMode_OrderedList(t *testing.T) {
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+
+	typeString(e, "1. first")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "second")
+
+	list := e.Segments()[0].(*ListSegment)
+	assert.True(t, list.Ordered)
+	assert.Equal(t, []string{"first\n", "second\n"}, itemTexts(t, e, 0))
+
+	list.Segments() // the numbers follow the order of the items
+	assert.Equal(t, "1. ", list.markers[0].marker())
+	assert.Equal(t, "2. ", list.markers[1].marker())
+}
+
+func TestRichTextEntry_MarkdownMode_CodeFence(t *testing.T) {
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+
+	typeString(e, "```")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "x := 1")
+
+	code, ok := e.Segments()[0].(*CodeBlockSegment)
+	assert.True(t, ok, "typing a fence opens a code block")
+	assert.Equal(t, "x := 1\n", code.Text)
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "```")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "after")
+
+	assert.Equal(t, "x := 1\n", code.Text) // the fence closed the block
+	assert.Equal(t, "x := 1\nafter", e.Text)
+	assert.Equal(t, "after", e.Segments()[1].Textual())
+}
+
+func TestRichTextEntry_CodeBlockEdits(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("intro\n\n```\ncode\n```\n\nafter")
+	assert.Equal(t, "intro\ncode\nafter", e.Text)
+
+	code := e.Segments()[1].(*CodeBlockSegment)
+	e.CursorRow, e.CursorColumn = 1, 4 // the end of the code
+
+	typeString(e, "X")
+	assert.Equal(t, "codeX\n", code.Text)
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+	assert.Equal(t, "cod\n", code.Text)
+	assert.Equal(t, "intro\ncod\nafter", e.Text)
+}
+
+func TestRichTextEntry_BlocksLayOutInRows(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntryFromMarkdown("intro\n\n- one\n- two\n\n```\ncode\nhere\n```\n\nafter")
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(300, 300))
+	e.Refresh()
+
+	provider := e.richProvider()
+	var rows []string
+	var panels []bool
+	for i := 0; i < provider.rows(); i++ {
+		rows = append(rows, string(provider.row(i)))
+		panels = append(panels, provider.rowBounds[i].panel != nil)
+	}
+
+	// the bullets are not part of any row, and the code lines sit on the panel
+	assert.Equal(t, []string{"intro", "one", "two", "code", "here", "", "after"}, rows)
+	assert.Equal(t, []bool{false, false, false, true, true, true, false}, panels)
+}
+
+func TestRichTextEntry_ListItemWrapIndents(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntryFromMarkdown("- an item with enough words in it to wrap onto a second line")
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(150, 200))
+	e.Refresh()
+
+	provider := e.richProvider()
+	assert.Greater(t, provider.rows(), 1, "the item should wrap")
+	assert.Greater(t, provider.rowBounds[1].indent, float32(0), "a wrapped item lines up with its text")
+}
+
+func TestRichTextEntry_ListDeleteJoinsItems(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("- one\n- two")
+	e.CursorRow, e.CursorColumn = 0, 3 // the end of the first item
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDelete})
+
+	assert.Equal(t, "onetwo", e.Text)
+	assert.Equal(t, []string{"onetwo"}, itemTexts(t, e, 0))
+	assert.Equal(t, 3, e.CursorColumn)
+}
+
+func TestRichTextEntry_BackspaceRemovesEmptyCodeBlock(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(250, 200))
+
+	typeString(e, "intro")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	typeString(e, "```")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	assert.IsType(t, &CodeBlockSegment{}, e.Segments()[1], "the fence opened a block")
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+	typeString(e, "x")
+
+	// the block is gone, leaving the line it was on to be typed in plain text
+	assert.Equal(t, "intro\nx", e.Text)
+	assert.Equal(t, []string{"intro\n|", "x|"}, segmentDump(e))
+	assert.Nil(t, e.richProvider().rowBounds[1].panel)
+}
+
+func TestRichTextEntry_BackspaceKeepsCodeBlockWithContent(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("intro\n\n```\ncode\n```\n\nafter")
+	e.CursorRow, e.CursorColumn = 1, 4
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn}) // an empty line inside the block
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+
+	code, ok := e.Segments()[1].(*CodeBlockSegment)
+	assert.True(t, ok, "a block with code in it stays")
+	assert.Equal(t, "code\n", code.Text)
+	assert.Equal(t, "intro\ncode\nafter", e.Text)
+}
+
+func TestRichTextEntry_BackspaceClearsEmptyStyle(t *testing.T) {
+	e := NewRichTextEntryFromMarkdown("intro\n\n# Title")
+	e.CursorRow, e.CursorColumn = 1, 5
+	for range "Title" {
+		e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+	}
+	assert.Equal(t, []string{"intro\n|", "|bh1"}, segmentDump(e))
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace}) // the empty heading loses its style
+	assert.Equal(t, "intro\n", e.Text)
+	assert.Equal(t, []string{"intro\n|", "|"}, segmentDump(e))
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace}) // and then the line goes as usual
+	assert.Equal(t, "intro", e.Text)
+}
+
+func TestRichTextEntry_DeleteClearsEmptyStyle(t *testing.T) {
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+
+	typeString(e, "> ")
+	assert.True(t, e.StyleAtCursor().QuotingDepth > 0)
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyDelete})
+	typeString(e, "plain")
+
+	assert.Equal(t, "plain", e.Text)
+	assert.Equal(t, RichTextStyleInline, e.StyleAtCursor())
+}
+
+func TestRichTextEntry_BackspaceJoinsBlankLineToItem(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntry()
+	e.TypeMarkdown = true
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(250, 200))
+
+	typeString(e, "- one")
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn})
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyReturn}) // an empty line below the list
+	assert.Equal(t, 1, e.CursorRow)
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+	typeString(e, "X")
+
+	// the blank line is gone and the cursor carried on at the end of the item
+	assert.Equal(t, "oneX", e.Text)
+	assert.Equal(t, []string{"oneX"}, itemTexts(t, e, 0))
+	assert.Equal(t, 0, e.CursorRow)
+	assert.Equal(t, 1, e.richProvider().rows())
+}
+
+func TestRichTextEntry_BackspaceJoinsLineToItem(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntryFromMarkdown("- one\n\nafter")
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(250, 200))
+	e.CursorRow, e.CursorColumn = 1, 0
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+
+	assert.Equal(t, "oneafter", e.Text)
+	assert.Equal(t, []string{"oneafter"}, itemTexts(t, e, 0))
+	assert.Equal(t, 0, e.CursorRow)
+	assert.Equal(t, 3, e.CursorColumn)
+}
+
+func TestRichTextEntry_BackspaceJoinsLineToCodeBlock(t *testing.T) {
+	test.NewTempApp(t)
+
+	e := NewRichTextEntryFromMarkdown("```\ncode\n```\n\nafter")
+	w := test.NewTempWindow(t, e)
+	w.Resize(fyne.NewSize(250, 200))
+	e.CursorRow, e.CursorColumn = 2, 0 // the line below the block
+
+	e.TypedKey(&fyne.KeyEvent{Name: fyne.KeyBackspace})
+
+	code, ok := e.Segments()[0].(*CodeBlockSegment)
+	assert.True(t, ok)
+	assert.Equal(t, "codeafter", code.Text) // the line joined the code above it
+	assert.Equal(t, "codeafter", e.Text)
+	assert.Equal(t, 4, e.CursorColumn)
 }

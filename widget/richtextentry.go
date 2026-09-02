@@ -1,6 +1,7 @@
 package widget
 
 import (
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -15,9 +16,15 @@ var (
 	_ fyne.Disableable = (*RichTextEntry)(nil)
 )
 
+// codeFence marks the start and end of a fenced code block in markdown.
+const codeFence = "```"
+
 // RichTextEntry widget allows styled text to be edited when focused.
 // It behaves like an [Entry] - but the content is held as a list of [RichTextSegment],
 // so different runs of text can use their own style and objects can appear inline.
+//
+// Bulleted lists and fenced code blocks keep the bullets and panel that they are
+// drawn with, whilst the text inside them is edited like the text around it.
 //
 // The content can be set from markdown using [RichTextEntry.ParseMarkdown] or [NewRichTextEntryFromMarkdown].
 // Setting [RichTextEntry.TypeMarkdown] additionally converts markdown into the matching style as it is typed.
@@ -67,8 +74,9 @@ func (e *RichTextEntry) Segments() []RichTextSegment {
 }
 
 // SetSegments replaces the content of this entry with the specified segments.
-// Segments that cannot be edited in place, such as lists or code blocks, are
-// converted to styled text so that the whole content remains editable.
+// Bulleted lists and fenced code blocks are kept, so that they still draw their
+// bullets and panel, with the text inside them editable like any other.
+// Segments that cannot be edited in place are converted to styled text.
 //
 // Since: 2.9
 func (e *RichTextEntry) SetSegments(segments []RichTextSegment) {
@@ -163,7 +171,7 @@ func (e *RichTextEntry) StyleAtCursor() RichTextStyle {
 	style := RichTextStyleInline
 
 	off := 0
-	for _, seg := range e.richProvider().Segments {
+	for _, seg := range e.richProvider().contentSegments() {
 		length := utf8.RuneCountInString(seg.Textual())
 		text, isText := seg.(*TextSegment)
 		if isText && ((off < pos && pos <= off+length) || (off == pos && length == 0)) {
@@ -188,6 +196,41 @@ func (e *RichTextEntry) TypedRune(r rune) {
 
 // TypedKey receives key input events when this widget is focused.
 func (e *RichTextEntry) TypedKey(key *fyne.KeyEvent) {
+	switch key.Name {
+	case fyne.KeyBackspace:
+		if e.hasSelection() {
+			break
+		}
+
+		// a bullet is removed before the text that it introduces
+		pos := e.CursorTextOffset()
+		if e.removeBullet(pos) || e.joinIntoBlockAbove(pos) || e.clearEmptyStyle() {
+			e.Refresh()
+			return
+		}
+	case fyne.KeyDelete:
+		if e.hasSelection() {
+			break
+		}
+
+		// deleting the break at the end of an item joins the one below it
+		pos := e.CursorTextOffset()
+		if e.removeBullet(pos + 1) {
+			e.setCursorOffset(pos)
+			e.Refresh()
+			return
+		}
+		if e.clearEmptyStyle() {
+			e.Refresh()
+			return
+		}
+	case fyne.KeyReturn, fyne.KeyEnter:
+		if e.MultiLine && !e.hasSelection() && e.startsBlockLine() {
+			e.Refresh()
+			return
+		}
+	}
+
 	e.Entry.TypedKey(key)
 
 	switch key.Name {
@@ -203,6 +246,25 @@ func (e *RichTextEntry) TypedKey(key *fyne.KeyEvent) {
 			e.Refresh()
 		}
 	}
+}
+
+// startsBlockLine handles a return that does more than break the line, either
+// carrying a list on to a new bullet or opening and closing a code block.
+// It reports whether the content was changed.
+func (e *RichTextEntry) startsBlockLine() bool {
+	if e.TypeMarkdown && e.toggleCodeFence() {
+		return true
+	}
+
+	return e.splitListItem(e.CursorTextOffset())
+}
+
+// hasSelection reports whether some of the content is currently selected.
+func (e *RichTextEntry) hasSelection() bool {
+	e.syncSelectable()
+
+	start, end := e.sel.selection()
+	return start >= 0 && start != end
 }
 
 // isBlockStyle reports whether a style applies to a whole line, rather than to a
@@ -275,22 +337,60 @@ func (e *RichTextEntry) richProvider() *RichText {
 	return &e.text
 }
 
-// splitAt divides segments as required so that the specified rune offset falls
-// on a segment boundary, returning the index of the segment starting there.
-func (e *RichTextEntry) splitAt(pos int) int {
-	provider := e.richProvider()
+// blockContainer returns the segments held inside a block, so that content can
+// be added to or removed from it. It returns nil for anything else, including
+// blocks such as code that hold their content as text of their own.
+func blockContainer(seg RichTextSegment) *[]RichTextSegment {
+	switch block := seg.(type) {
+	case *ParagraphSegment:
+		return &block.Texts
+	case *ListSegment:
+		return &block.Items
+	}
 
-	off := 0
-	for i := 0; i < len(provider.Segments); i++ {
-		seg := provider.Segments[i]
+	return nil
+}
+
+// splitAt divides segments as required so that the specified rune offset falls on
+// a segment boundary. It returns the list of segments holding that boundary, which
+// may be inside a block, and the index of the segment that starts there.
+func (e *RichTextEntry) splitAt(pos int) (*[]RichTextSegment, int) {
+	provider := e.richProvider()
+	if list, i, _ := splitSegmentsAt(&provider.Segments, pos, 0); list != nil {
+		return list, i
+	}
+
+	return &provider.Segments, len(provider.Segments)
+}
+
+// splitSegmentsAt looks for the rune offset in the given segments, dividing a text
+// segment where the offset falls inside one. It returns the list that holds the
+// boundary with the index of the segment starting there, or a nil list and the
+// offset reached when the position is beyond these segments.
+func splitSegmentsAt(list *[]RichTextSegment, pos, off int) (*[]RichTextSegment, int, int) {
+	for i := 0; i < len(*list); i++ {
+		seg := (*list)[i]
+		if inner := blockContainer(seg); inner != nil {
+			found, index, next := splitSegmentsAt(inner, pos, off)
+			if found != nil {
+				return found, index, next
+			}
+
+			off = next
+			continue
+		}
+
 		length := utf8.RuneCountInString(seg.Textual())
 		if pos == off {
-			return i
+			if _, isText := seg.(*TextSegment); !isText && length == 0 {
+				continue // a bullet introduces the text that follows it
+			}
+			return list, i, off
 		}
 		if pos < off+length {
 			text, ok := seg.(*TextSegment)
 			if !ok {
-				return i + 1 // objects cannot be divided
+				return list, i + 1, off + length // objects cannot be divided
 			}
 
 			runes := []rune(text.Text)
@@ -298,16 +398,17 @@ func (e *RichTextEntry) splitAt(pos int) int {
 			tail := &TextSegment{Style: text.Style, Text: string(runes[cut:])}
 			text.Text = string(runes[:cut])
 
-			segments := make([]RichTextSegment, 0, len(provider.Segments)+1)
-			segments = append(segments, provider.Segments[:i+1]...)
+			segments := make([]RichTextSegment, 0, len(*list)+1)
+			segments = append(segments, (*list)[:i+1]...)
 			segments = append(segments, tail)
-			segments = append(segments, provider.Segments[i+1:]...)
-			provider.Segments = segments
-			return i + 1
+			segments = append(segments, (*list)[i+1:]...)
+			*list = segments
+			return list, i + 1, pos
 		}
 		off += length
 	}
-	return len(provider.Segments)
+
+	return nil, 0, off
 }
 
 // styleRange updates the style of every text segment between the two rune
@@ -324,7 +425,7 @@ func (e *RichTextEntry) styleRange(start, end int, apply func(*RichTextStyle)) {
 	e.splitAt(end)
 
 	off := 0
-	for _, seg := range provider.Segments {
+	for _, seg := range provider.contentSegments() {
 		length := utf8.RuneCountInString(seg.Textual())
 		if length > 0 && off >= start && off+length <= end {
 			if text, ok := seg.(*TextSegment); ok {
@@ -338,34 +439,21 @@ func (e *RichTextEntry) styleRange(start, end int, apply func(*RichTextStyle)) {
 // insertEmptySegmentAt places an empty segment with the given style at the rune offset.
 func (e *RichTextEntry) insertEmptySegmentAt(pos int, style RichTextStyle) {
 	style.Inline = true
-	provider := e.richProvider()
 	e.dropEmptySegmentsAt(pos) // only one segment may claim the text typed here
-	i := e.splitAt(pos)
+	list, i := e.splitAt(pos)
 
-	segments := make([]RichTextSegment, 0, len(provider.Segments)+1)
-	segments = append(segments, provider.Segments[:i]...)
+	segments := make([]RichTextSegment, 0, len(*list)+1)
+	segments = append(segments, (*list)[:i]...)
 	segments = append(segments, &TextSegment{Style: style})
-	segments = append(segments, provider.Segments[i:]...)
-	provider.Segments = segments
+	segments = append(segments, (*list)[i:]...)
+	*list = segments
 }
 
 // dropEmptySegmentsAt removes any empty text segments sitting at the given rune
 // offset, so that a replacement can take ownership of text typed there.
 func (e *RichTextEntry) dropEmptySegmentsAt(pos int) {
 	provider := e.richProvider()
-
-	segments := make([]RichTextSegment, 0, len(provider.Segments))
-	off := 0
-	for _, seg := range provider.Segments {
-		length := utf8.RuneCountInString(seg.Textual())
-		if _, isText := seg.(*TextSegment); isText && length == 0 && off == pos {
-			continue
-		}
-
-		segments = append(segments, seg)
-		off += length
-	}
-	provider.Segments = segments
+	dropEmptySegments(&provider.Segments, 0, false, func(off int) bool { return off == pos })
 }
 
 // pruneEmptySegments drops empty text segments, apart from any at the cursor -
@@ -374,26 +462,43 @@ func (e *RichTextEntry) dropEmptySegmentsAt(pos int) {
 func (e *RichTextEntry) pruneEmptySegments() bool {
 	provider := e.richProvider()
 	cursor := e.CursorTextOffset()
+	_, removed := dropEmptySegments(&provider.Segments, 0, false, func(off int) bool { return off != cursor })
 
-	segments := make([]RichTextSegment, 0, len(provider.Segments))
-	off := 0
-	for _, seg := range provider.Segments {
-		length := utf8.RuneCountInString(seg.Textual())
-		if _, isText := seg.(*TextSegment); isText && length == 0 && off != cursor {
+	if len(provider.Segments) == 0 {
+		provider.Segments = []RichTextSegment{&TextSegment{Style: RichTextStyleInline}}
+	}
+	return removed
+}
+
+// dropEmptySegments removes the empty text segments that drop reports for, looking
+// inside the blocks that hold content. It returns the offset reached and whether any
+// segment was removed.
+func dropEmptySegments(list *[]RichTextSegment, off int, inBlock bool, drop func(off int) bool) (int, bool) {
+	removed := false
+	segments := make([]RichTextSegment, 0, len(*list))
+	for _, seg := range *list {
+		if inner := blockContainer(seg); inner != nil {
+			next, innerRemoved := dropEmptySegments(inner, off, true, drop)
+			off, removed = next, removed || innerRemoved
+
+			segments = append(segments, seg)
+			continue
+		}
+
+		lastInBlock := inBlock && len(*list) == 1
+		if text, ok := seg.(*TextSegment); ok && text.Text == "" && !lastInBlock && drop(off) {
+			removed = true
 			continue
 		}
 
 		segments = append(segments, seg)
-		off += length
+		off += utf8.RuneCountInString(seg.Textual())
 	}
 
-	if len(segments) == 0 {
-		segments = append(segments, &TextSegment{Style: RichTextStyleInline})
+	if removed {
+		*list = segments
 	}
-
-	removed := len(segments) != len(provider.Segments)
-	provider.Segments = segments
-	return removed
+	return off, removed
 }
 
 // mergeSegments joins neighbouring text segments that share a style, keeping the
@@ -428,6 +533,8 @@ func mergeSegments(in []RichTextSegment) []RichTextSegment {
 // editableSegments converts parsed rich text into a form where every character
 // can be edited: a flat run of inline segments, with block boundaries expressed
 // as newline characters instead of block styling.
+// Lists and code blocks are kept, as they draw the bullets and panel that their
+// content sits on, with the content inside them flattened in the same way.
 func editableSegments(in []RichTextSegment) []RichTextSegment {
 	return mergeSegments(trimTrailingNewline(flattenSegments(in, nil)))
 }
@@ -435,16 +542,17 @@ func editableSegments(in []RichTextSegment) []RichTextSegment {
 // trimTrailingNewline removes the line break that closes the final block, as
 // there is no following content for it to separate.
 func trimTrailingNewline(segments []RichTextSegment) []RichTextSegment {
-	for i := len(segments) - 1; i >= 0; i-- {
-		text, ok := segments[i].(*TextSegment)
+	content := appendContentSegments(segments, nil)
+	for i := len(content) - 1; i >= 0; i-- {
+		holder, ok := content[i].(textHolder)
 		if !ok {
 			return segments
 		}
-		if text.Text == "" {
+		if holder.content() == "" {
 			continue
 		}
 
-		text.Text = strings.TrimSuffix(text.Text, newLineChar)
+		holder.setContent(strings.TrimSuffix(holder.content(), newLineChar))
 		return segments
 	}
 	return segments
@@ -453,12 +561,13 @@ func trimTrailingNewline(segments []RichTextSegment) []RichTextSegment {
 // endsWithNewline reports whether the flattened content already ends with a
 // line break, so that nested blocks do not each add one of their own.
 func endsWithNewline(segments []RichTextSegment) bool {
-	for i := len(segments) - 1; i >= 0; i-- {
-		content := segments[i].Textual()
-		if content == "" {
+	content := appendContentSegments(segments, nil)
+	for i := len(content) - 1; i >= 0; i-- {
+		text := content[i].Textual()
+		if text == "" {
 			continue
 		}
-		return strings.HasSuffix(content, newLineChar)
+		return strings.HasSuffix(text, newLineChar)
 	}
 	return false
 }
@@ -494,10 +603,10 @@ func flattenSegments(in []RichTextSegment, out []RichTextSegment) []RichTextSegm
 			appendText(RichTextStyleInline, "---")
 			newline()
 		case *CodeBlockSegment:
-			style := RichTextStyleCodeBlock
-			style.QuotingDepth = t.quotingLevel
-			appendText(style, t.Text)
 			newline()
+			// the last line of the block ends where the panel does
+			t.Text = strings.TrimSuffix(t.Text, newLineChar) + newLineChar
+			out = append(out, t)
 		case *CheckBoxSegment:
 			marker := "- [ ] "
 			if t.Checked {
@@ -506,9 +615,8 @@ func flattenSegments(in []RichTextSegment, out []RichTextSegment) []RichTextSegm
 			appendText(RichTextStyleInline, marker+t.Text)
 			newline()
 		case *ListSegment:
-			for _, item := range t.Segments() {
-				out = flattenSegments([]RichTextSegment{item}, out)
-			}
+			newline()
+			out = append(out, editableList(t))
 		case *TableSegment:
 			out = flattenTable(t, out)
 		case *ParagraphSegment:
@@ -526,6 +634,28 @@ func flattenSegments(in []RichTextSegment, out []RichTextSegment) []RichTextSegm
 		}
 	}
 	return out
+}
+
+// editableList rewrites the items of a list so that each one holds a flat run of
+// inline segments, ending in the line break that closes the item.
+func editableList(l *ListSegment) *ListSegment {
+	items := make([]RichTextSegment, 0, len(l.Items))
+	for _, item := range l.Items {
+		if sub, ok := item.(*ListSegment); ok { // a nested list follows its parent item
+			items = append(items, editableList(sub))
+			continue
+		}
+
+		texts := mergeSegments(flattenSegments([]RichTextSegment{item}, nil))
+		if !endsWithNewline(texts) {
+			texts = append(texts, &TextSegment{Style: RichTextStyleInline, Text: newLineChar})
+		}
+		items = append(items, &ParagraphSegment{Texts: texts})
+	}
+
+	l.Items = items
+	l.markers = nil
+	return l
 }
 
 func flattenTable(t *TableSegment, out []RichTextSegment) []RichTextSegment {
@@ -758,7 +888,12 @@ func (e *RichTextEntry) styleMarkdownInline(runes []rune, lineStart, pos int) bo
 }
 
 func (e *RichTextEntry) styleMarkdownBlock(runes []rune, lineStart, pos int) bool {
-	style, ok := markdownBlockStyle(string(runes[lineStart : pos-1]))
+	prefix := string(runes[lineStart : pos-1])
+	if ordered, number, indent, ok := markdownListPrefix(prefix); ok {
+		return e.startListAt(lineStart, pos, ordered, number, indent)
+	}
+
+	style, ok := markdownBlockStyle(prefix)
 	if !ok {
 		return false
 	}
@@ -840,4 +975,570 @@ func lastIndexRunes(haystack, needle []rune) int {
 		}
 	}
 	return -1
+}
+
+// richListItem describes where a rune offset falls inside a list.
+type richListItem struct {
+	list  *ListSegment
+	owner *[]RichTextSegment // the segments that hold the list
+	index int                // which item of the list holds the offset
+	start int                // the rune offset that the item content begins at
+}
+
+// listItemAt returns the list item holding the given rune offset. An offset in a
+// nested list belongs to the innermost list that holds it.
+func (e *RichTextEntry) listItemAt(pos int) (richListItem, bool) {
+	provider := e.richProvider()
+	item, _, ok := findListItem(&provider.Segments, pos, 0)
+	return item, ok
+}
+
+// findListItem walks segments in document order looking for the list item that
+// holds the offset. It returns the item, the offset reached and whether the item
+// was found.
+func findListItem(owner *[]RichTextSegment, pos, off int) (richListItem, int, bool) {
+	for _, seg := range *owner {
+		if list, ok := seg.(*ListSegment); ok {
+			item, next, found := findInList(list, owner, pos, off)
+			if found {
+				return item, next, true
+			}
+
+			off = next
+			continue
+		}
+
+		if inner := blockContainer(seg); inner != nil {
+			item, next, found := findListItem(inner, pos, off)
+			if found {
+				return item, next, true
+			}
+
+			off = next
+			continue
+		}
+
+		off += utf8.RuneCountInString(seg.Textual())
+	}
+
+	return richListItem{}, off, false
+}
+
+func findInList(list *ListSegment, owner *[]RichTextSegment, pos, off int) (richListItem, int, bool) {
+	for i, item := range list.Items {
+		if sub, ok := item.(*ListSegment); ok {
+			found, next, ok := findInList(sub, &list.Items, pos, off)
+			if ok {
+				return found, next, true
+			}
+
+			off = next
+			continue
+		}
+
+		length := contentLength(item)
+		end := off + length
+		if !endsWithNewline([]RichTextSegment{item}) {
+			end++ // the last item of the content has no line break to close it
+		}
+		if pos >= off && pos < end {
+			return richListItem{list: list, owner: owner, index: i, start: off}, off, true
+		}
+		off += length
+	}
+
+	return richListItem{}, off, false
+}
+
+// contentLength returns how many runes of content a segment holds, including any
+// that are inside it.
+func contentLength(seg RichTextSegment) int {
+	total := 0
+	for _, leaf := range appendContentSegments([]RichTextSegment{seg}, nil) {
+		total += utf8.RuneCountInString(leaf.Textual())
+	}
+	return total
+}
+
+// splitListItem divides the list item at the given offset in two, so that a new
+// bullet appears for the text that follows the cursor. Pressing return on an item
+// with no content instead closes the list.
+// It reports whether the content was changed.
+func (e *RichTextEntry) splitListItem(pos int) bool {
+	item, ok := e.listItemAt(pos)
+	if !ok {
+		return false
+	}
+
+	content := item.list.Items[item.index]
+	if contentLength(content) <= 1 && item.index == len(item.list.Items)-1 {
+		return e.leaveList(item, pos) // an empty item at the end closes the list
+	}
+
+	texts := blockContent(content)
+	closed := endsWithNewline(texts) // the last item of the content is left open
+
+	head, tail := splitContent(texts, pos-item.start)
+	head = closeItem(head)
+	if closed {
+		tail = closeItem(tail)
+	} else {
+		tail = mergeSegments(tail)
+	}
+
+	items := make([]RichTextSegment, 0, len(item.list.Items)+1)
+	items = append(items, item.list.Items[:item.index]...)
+	items = append(items, &ParagraphSegment{Texts: head}, &ParagraphSegment{Texts: tail})
+	items = append(items, item.list.Items[item.index+1:]...)
+	item.list.Items = items
+	item.list.markers = nil // the bullets are numbered again from the items
+
+	e.finishStyling(pos + 1)
+	return true
+}
+
+// leaveList takes the empty item out of its list, so that typing carries on below
+// the list rather than against a bullet.
+func (e *RichTextEntry) leaveList(item richListItem, pos int) bool {
+	list := item.list
+	list.Items = append(list.Items[:item.index], list.Items[item.index+1:]...)
+	list.markers = nil
+
+	segments := *item.owner
+	at := indexOfSegment(segments, list) + 1
+	if len(list.Items) == 0 { // the list has nothing left in it
+		at--
+		segments = append(segments[:at], segments[at+1:]...)
+	}
+
+	out := make([]RichTextSegment, 0, len(segments)+1)
+	out = append(out, segments[:at]...)
+	out = append(out, &TextSegment{Style: RichTextStyleInline})
+	out = append(out, segments[at:]...)
+	*item.owner = out
+
+	e.finishStyling(pos)
+	return true
+}
+
+// removeBullet takes the item at the cursor out of its list when the cursor is at
+// the start of it, so that a backspace removes the bullet before the text.
+// It reports whether the content was changed.
+func (e *RichTextEntry) removeBullet(pos int) bool {
+	item, ok := e.listItemAt(pos)
+	if !ok || pos != item.start {
+		return false
+	}
+
+	list := item.list
+	texts := blockContent(list.Items[item.index])
+	list.Items = append(list.Items[:item.index], list.Items[item.index+1:]...)
+	list.markers = nil
+
+	if item.index > 0 { // the text joins the end of the item above it
+		prev := trimTrailingNewline(blockContent(list.Items[item.index-1]))
+		list.Items[item.index-1] = &ParagraphSegment{Texts: append(prev, texts...)}
+
+		e.finishStyling(pos - 1)
+		return true
+	}
+
+	// the first item has no bullet above it to join, so it leaves the list
+	segments := *item.owner
+	at := indexOfSegment(segments, list)
+	if len(list.Items) == 0 {
+		segments = append(segments[:at], segments[at+1:]...)
+	}
+
+	out := make([]RichTextSegment, 0, len(segments)+len(texts))
+	out = append(out, segments[:at]...)
+	out = append(out, texts...)
+	out = append(out, segments[at:]...)
+	*item.owner = out
+
+	e.finishStyling(pos)
+	return true
+}
+
+// splitContent divides a run of segments at the given rune offset, dividing a text
+// segment where the offset falls inside one.
+func splitContent(in []RichTextSegment, at int) (head, tail []RichTextSegment) {
+	off := 0
+	for _, seg := range in {
+		length := utf8.RuneCountInString(seg.Textual())
+		switch {
+		case off+length <= at:
+			head = append(head, seg)
+		case off >= at:
+			tail = append(tail, seg)
+		default:
+			text, isText := seg.(*TextSegment)
+			if !isText { // an object cannot be divided, it goes with the tail
+				tail = append(tail, seg)
+				break
+			}
+
+			runes := []rune(text.Text)
+			cut := at - off
+			tail = append(tail, &TextSegment{Style: text.Style, Text: string(runes[cut:])})
+			text.Text = string(runes[:cut])
+			head = append(head, text)
+		}
+		off += length
+	}
+
+	return head, tail
+}
+
+// closeItem makes sure that the content of a list item ends in the line break
+// that closes it.
+func closeItem(texts []RichTextSegment) []RichTextSegment {
+	if !endsWithNewline(texts) {
+		texts = append(texts, &TextSegment{Style: RichTextStyleInline, Text: newLineChar})
+	}
+
+	return mergeSegments(texts)
+}
+
+func indexOfSegment(segments []RichTextSegment, seg RichTextSegment) int {
+	for i, in := range segments {
+		if in == seg {
+			return i
+		}
+	}
+
+	return len(segments)
+}
+
+// codeBlockAt returns the code block that holds the given rune offset, with the
+// segments that hold the block and its index in them.
+func codeBlockAt(owner *[]RichTextSegment, pos, off int) (*[]RichTextSegment, int, int, bool) {
+	for i, seg := range *owner {
+		if inner := blockContainer(seg); inner != nil {
+			list, index, next, ok := codeBlockAt(inner, pos, off)
+			if ok {
+				return list, index, next, true
+			}
+
+			off = next
+			continue
+		}
+
+		length := utf8.RuneCountInString(seg.Textual())
+		if _, ok := seg.(*CodeBlockSegment); ok && pos > off && pos <= off+length {
+			return owner, i, off, true
+		}
+		off += length
+	}
+
+	return nil, 0, off, false
+}
+
+// toggleCodeFence acts on a "```" that has just been completed by a return,
+// opening a code block for the lines that follow or, when the fence was typed
+// inside a block, closing it again.
+// It reports whether the content was changed.
+func (e *RichTextEntry) toggleCodeFence() bool {
+	pos := e.CursorTextOffset()
+	runes := []rune(e.Text)
+	if pos > len(runes) {
+		return false
+	}
+
+	lineStart := 0
+	for i := pos - 1; i >= 0; i-- {
+		if runes[i] == '\n' {
+			lineStart = i + 1
+			break
+		}
+	}
+	if !strings.HasPrefix(strings.TrimSpace(string(runes[lineStart:pos])), codeFence) {
+		return false
+	}
+
+	provider := e.richProvider()
+	if owner, index, blockStart, ok := codeBlockAt(&provider.Segments, pos, 0); ok {
+		// the fence closes the block, so it and the line it is on are removed
+		from := lineStart
+		if from > blockStart {
+			from--
+		}
+		block := (*owner)[index].(*CodeBlockSegment)
+		provider.deleteFromTo(from, pos)
+
+		end := blockStart + utf8.RuneCountInString(block.Text)
+		e.dropEmptySegmentsAt(end) // only one segment may claim the text typed here
+		insertSegmentAt(owner, indexOfSegment(*owner, block)+1, &TextSegment{Style: RichTextStyleInline})
+
+		e.finishStyling(end)
+		return true
+	}
+
+	provider.deleteFromTo(lineStart, pos)
+	e.dropEmptySegmentsAt(lineStart)
+	list, at := e.splitAt(lineStart)
+	insertSegmentAt(list, at, &CodeBlockSegment{Text: newLineChar})
+
+	e.finishStyling(lineStart)
+	return true
+}
+
+func insertSegmentAt(list *[]RichTextSegment, index int, seg RichTextSegment) {
+	index = min(index, len(*list))
+	segments := make([]RichTextSegment, 0, len(*list)+1)
+	segments = append(segments, (*list)[:index]...)
+	segments = append(segments, seg)
+	segments = append(segments, (*list)[index:]...)
+	*list = segments
+}
+
+// markdownListPrefix reports whether the text typed at the start of a line asks
+// for a list, returning what kind of list it describes.
+func markdownListPrefix(prefix string) (ordered bool, number, indent int, ok bool) {
+	for _, r := range prefix {
+		if r == '\t' {
+			indent++
+			continue
+		}
+		if r != ' ' {
+			break
+		}
+		number++ // counting spaces for now, the indent is worked out below
+	}
+
+	indent += number / listIndentSpaces
+	prefix = strings.TrimLeft(prefix, " \t")
+	number = 0
+
+	switch prefix {
+	case "-", "*", "+":
+		return false, 0, indent, true
+	}
+
+	if digits, found := strings.CutSuffix(prefix, "."); found {
+		if start, err := strconv.Atoi(digits); err == nil {
+			return true, start, indent, true
+		}
+	}
+	return false, 0, 0, false
+}
+
+// startListAt turns the line at the given offset into the item of a list, joining
+// a list that the line follows where there is one.
+// It reports whether the content was changed.
+func (e *RichTextEntry) startListAt(lineStart, pos int, ordered bool, number, indent int) bool {
+	provider := e.richProvider()
+	provider.deleteFromTo(lineStart, pos) // the bullet is drawn by the list from here on
+	e.dropEmptySegmentsAt(lineStart)
+
+	lineEnd := lineStart
+	for runes := []rune(provider.String()); lineEnd < len(runes); lineEnd++ {
+		if runes[lineEnd] == '\n' {
+			lineEnd++ // the line break closes the item
+			break
+		}
+	}
+
+	list, from := e.splitAt(lineStart)
+	other, to := e.splitAt(lineEnd)
+	if other != list { // the line ends outside of these segments
+		to = len(*list)
+	}
+
+	texts := closeItem(append([]RichTextSegment{}, (*list)[from:to]...))
+	item := &ParagraphSegment{Texts: texts}
+
+	segments := make([]RichTextSegment, 0, len(*list))
+	segments = append(segments, (*list)[:from]...)
+	if from > 0 {
+		if prev, ok := segments[from-1].(*ListSegment); ok && prev.Ordered == ordered && prev.indentationLevel == indent {
+			prev.Items = append(prev.Items, item) // this line carries on the list above it
+			prev.markers = nil
+
+			*list = append(segments, (*list)[to:]...)
+			e.finishStyling(lineStart)
+			return true
+		}
+	}
+
+	added := &ListSegment{Items: []RichTextSegment{item}, Ordered: ordered, indentationLevel: indent}
+	if ordered {
+		added.SetStartNumber(number)
+	}
+
+	segments = append(segments, added)
+	*list = append(segments, (*list)[to:]...)
+
+	e.finishStyling(lineStart)
+	return true
+}
+
+// clearEmptyStyle takes the styling off a line that has nothing typed on it, so
+// that a delete on an empty heading, quote or code block removes the style that
+// it was going to be typed in rather than the line break before it.
+// It reports whether the content was changed.
+func (e *RichTextEntry) clearEmptyStyle() bool {
+	provider := e.richProvider()
+	bound := provider.rowBoundary(e.CursorRow)
+	if bound == nil || len(provider.row(e.CursorRow)) > 0 {
+		return false // there is content on this line to remove first
+	}
+
+	if block, ok := bound.panel.(*CodeBlockSegment); ok && strings.TrimSuffix(block.Text, newLineChar) == "" {
+		return e.removeEmptyBlock(block)
+	}
+
+	pos := e.CursorTextOffset()
+	style, ok := e.emptyStyleAt(pos)
+	if !ok || isPlainStyle(style) {
+		return false
+	}
+
+	e.insertEmptySegmentAt(pos, RichTextStyleInline)
+	e.finishStyling(pos)
+	return true
+}
+
+// removeEmptyBlock takes a block with nothing in it out of the content, leaving a
+// plain line where the block was.
+func (e *RichTextEntry) removeEmptyBlock(block RichTextSegment) bool {
+	provider := e.richProvider()
+	owner, index, start, ok := ownerOf(&provider.Segments, block, 0)
+	if !ok {
+		return false
+	}
+
+	segments := make([]RichTextSegment, 0, len(*owner))
+	segments = append(segments, (*owner)[:index]...)
+	segments = append(segments, (*owner)[index+1:]...)
+	*owner = segments
+
+	e.insertEmptySegmentAt(start, RichTextStyleInline)
+	e.finishStyling(start)
+	return true
+}
+
+// emptyStyleAt returns the style of an empty segment at the given rune offset,
+// which is the style that text typed there would take.
+func (e *RichTextEntry) emptyStyleAt(pos int) (RichTextStyle, bool) {
+	off := 0
+	for _, seg := range e.richProvider().contentSegments() {
+		length := utf8.RuneCountInString(seg.Textual())
+		if text, isText := seg.(*TextSegment); isText && length == 0 && off == pos {
+			return text.Style, true
+		}
+
+		off += length
+		if off > pos {
+			break
+		}
+	}
+
+	return RichTextStyle{}, false
+}
+
+// isPlainStyle reports whether a style adds nothing to ordinary body text.
+func isPlainStyle(style RichTextStyle) bool {
+	return style.TextStyle == (fyne.TextStyle{}) && !isBlockStyle(style)
+}
+
+// ownerOf returns the segments that hold the given segment, its index in them and
+// the rune offset that it starts at.
+func ownerOf(list *[]RichTextSegment, seg RichTextSegment, off int) (*[]RichTextSegment, int, int, bool) {
+	for i, in := range *list {
+		if in == seg {
+			return list, i, off, true
+		}
+
+		if inner := blockContainer(in); inner != nil {
+			owner, index, next, ok := ownerOf(inner, seg, off)
+			if ok {
+				return owner, index, next, true
+			}
+
+			off = next
+			continue
+		}
+
+		off += contentLength(in)
+	}
+
+	return nil, 0, off, false
+}
+
+// joinIntoBlockAbove moves the line at the cursor into the list item, or code
+// block, that ends where the line begins.
+// It reports whether the content was changed.
+func (e *RichTextEntry) joinIntoBlockAbove(pos int) bool {
+	runes := []rune(e.Text)
+	if pos <= 0 || pos > len(runes) || runes[pos-1] != '\n' {
+		return false // this is not the start of a line
+	}
+
+	if item, ok := e.listItemAt(pos - 1); ok && item.start+contentLength(item.list.Items[item.index]) == pos {
+		texts, taken := e.takeLine(pos)
+		if !taken {
+			return false
+		}
+
+		content := trimTrailingNewline(blockContent(item.list.Items[item.index]))
+		item.list.Items[item.index] = &ParagraphSegment{Texts: mergeSegments(append(content, texts...))}
+
+		e.finishStyling(pos - 1)
+		return true
+	}
+
+	provider := e.richProvider()
+	owner, index, _, ok := codeBlockAt(&provider.Segments, pos, 0)
+	if !ok {
+		return false
+	}
+
+	block := (*owner)[index].(*CodeBlockSegment)
+	if bound := provider.rowBoundary(e.CursorRow); bound == nil || bound.panel == block {
+		return false // the cursor is inside the block, not on the line below it
+	}
+
+	texts, taken := e.takeLine(pos)
+	if !taken {
+		return false
+	}
+
+	line := &strings.Builder{}
+	for _, seg := range appendContentSegments(texts, nil) {
+		line.WriteString(seg.Textual())
+	}
+	block.Text = strings.TrimSuffix(block.Text, newLineChar) + line.String()
+
+	e.finishStyling(pos - 1)
+	return true
+}
+
+// takeLine removes the segments that make up the line starting at the given rune
+// offset from the content, returning them so that they can be added elsewhere.
+func (e *RichTextEntry) takeLine(pos int) ([]RichTextSegment, bool) {
+	runes := []rune(e.Text)
+	lineEnd := pos
+	for ; lineEnd < len(runes); lineEnd++ {
+		if runes[lineEnd] == '\n' {
+			lineEnd++ // the break that closes the line goes with it
+			break
+		}
+	}
+
+	list, from := e.splitAt(pos)
+	other, to := e.splitAt(lineEnd)
+	if other != list || lineEnd >= len(runes) {
+		to = len(*list) // the line runs past the end of these segments
+	}
+	if from > to {
+		return nil, false
+	}
+
+	texts := append([]RichTextSegment{}, (*list)[from:to]...)
+	segments := make([]RichTextSegment, 0, len(*list))
+	segments = append(segments, (*list)[:from]...)
+	segments = append(segments, (*list)[to:]...)
+	*list = segments
+	return texts, true
 }

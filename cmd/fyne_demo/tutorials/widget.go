@@ -248,7 +248,10 @@ This styled row should also wrap as expected, but only *when required*.
 
 	richEntry := widget.NewRichTextEntryFromMarkdown(`## Editable rich text
 
-Type **markdown** here and it styles *itself* as you go, ` + "`code`" + ` included.`)
+Type **markdown** here and it styles *itself* as you go, ` + "`code`" + ` included.
+
+- lists keep their bullets as you edit
+- press return for the next item`)
 	richEntry.TypeMarkdown = true
 
 	radioAlign := widget.NewRadioGroup([]string{"Leading", "Center", "Trailing"}, func(s string) {

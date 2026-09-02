@@ -1295,15 +1295,15 @@ func (e *Entry) syncSegments() {
 
 	if e.rich {
 		// Ignore segments we don't control, just style the text type
-		for _, seg := range text.Segments {
-			textSegment, ok := seg.(*TextSegment)
-			if !ok {
-				continue
-			}
-
-			switch textSegment.Style.ColorName {
-			case theme.ColorNameForeground, theme.ColorNameDisabled, "":
-				textSegment.Style.ColorName = colName
+		for _, seg := range text.contentSegments() {
+			switch styled := seg.(type) {
+			case *TextSegment:
+				switch styled.Style.ColorName {
+				case theme.ColorNameForeground, theme.ColorNameDisabled, "":
+					styled.Style.ColorName = colName
+				}
+			case *listMarkerSegment:
+				styled.colorName = colName
 			}
 		}
 	} else {
